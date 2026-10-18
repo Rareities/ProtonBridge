@@ -9,8 +9,8 @@ object BisyncFailureReport {
             "The recorded checksums disagree; the sync could not verify matching contents. " +
                 "This run did not complete successfully. Review the task before recovery. " +
                 "Close apps editing this folder, compare " +
-                "the affected local and remote files, then run Save and preview and " +
-                "Review and initialise again. Do not bypass checksum checks.\n"
+                "the affected local and remote files, then review the settings and " +
+                "confirm Resync. Do not bypass checksum checks.\n"
         } else ""
         return explanation + "rclone exited with status $code.\n" + clean.takeLast(1400)
     }

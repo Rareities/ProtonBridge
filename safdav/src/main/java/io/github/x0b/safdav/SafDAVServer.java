@@ -94,7 +94,8 @@ public class SafDAVServer extends NanoHTTPD {
             return true;
         }
         String suppliedAuthHeader = session.getHeaders().get("authorization");
-        return requiredAuthHeader.equals(suppliedAuthHeader);
+        return suppliedAuthHeader != null && java.security.MessageDigest.isEqual(
+                requiredAuthHeader.getBytes(StandardCharsets.UTF_8), suppliedAuthHeader.getBytes(StandardCharsets.UTF_8));
     }
 
     private Response badRequest(String signature) {

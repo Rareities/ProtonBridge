@@ -40,13 +40,12 @@ public class NativeFilterTest {
             }
             File left=new File(root,"left"); left.mkdir();
             List<String> filter=FilterRules.arguments(Collections.singletonList(new FilterEntry(FilterEntry.FILTER_INCLUDE,"*.anki2")),Collections.singletonList("--exclude=.nomedia"));
-            for(String operation:Arrays.asList("preview","initialise","run")) {
+            for(String operation:Arrays.asList("initialise","run")) {
                 List<String> args=new ArrayList<>(Arrays.asList("bisync",left.toString(),right.toString(),"--workdir="+new File(root,"baseline")));
                 args.addAll(filter);
                 if(!operation.equals("run")) args.addAll(Arrays.asList("--resync","--resync-mode=path2"));
-                if(operation.equals("preview")) args.add("--dry-run");
                 run(root,args.toArray(new String[0]));
-                assertEquals(!operation.equals("preview"),new File(left,"nested/deck.anki2").exists());
+                assertTrue(new File(left,"nested/deck.anki2").exists());
                 assertFalse(new File(left,".nomedia").exists()); assertFalse(new File(left,"nested/.nomedia").exists());
                 assertFalse(new File(left,"extra.txt").exists());
                 assertTrue(new File(right,".nomedia").exists()); // Exclusion never deletes the source marker.

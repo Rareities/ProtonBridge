@@ -74,7 +74,6 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
     private var exitCode: Int? = null
     private var completed = false
     private var allowFollowup = false
-    private var advisoryPreview = false
     private var detail = ""
     private var startedAt = 0L
     private var accountIdentity: String? = null
@@ -260,8 +259,6 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
     }
 
     private fun handleBisync(savedTask: Task, operation: String, filters: ArrayList<FilterEntry>) {
-        var previewRoot: File? = null
-        var previewProcessExited = false
         val preparation = io.github.rareities.protonbridge.util.ConfigurationExclusion.prepare()
         try {
             // Task.copy() only copies its constructor ID; serialize every option instead.
@@ -272,17 +269,16 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
             account?.let { ProtonAccountState.requireReady(mContext, it.identity) }
             BisyncPolicy.validate(mContext, task)
             val directory = BisyncPolicy.workdir(mContext, task)
-            if (operation == BisyncStateStore.PREVIEW) previewRoot = directory
             val state = BisyncStateStore(directory)
-            val fingerprint = BisyncPolicy.fingerprint(task, filters, mRclone.configurationIdentity { isStopped || cancelled })
-            val advisory = operation == BisyncStateStore.PREVIEW && BisyncStateStore.isAdvisoryPreview(state.read(), fingerprint)
-            advisoryPreview = advisory
-            val engineOperation = if (advisory) "preview-existing" else operation
+            val configIdentity = mRclone.configurationIdentity { isStopped || cancelled }
+            val fingerprint = BisyncPolicy.fingerprint(task, filters, configIdentity)
+            if (operation == BisyncStateStore.RUN) state.migrateLegacyFingerprint(fingerprint,
+                BisyncPolicy.legacyFingerprint(task, filters, configIdentity))
+            val recoveryEnabled = io.github.rareities.protonbridge.util.AdvancedOptions.recoveryEnabled(task.bisyncAdvancedOptions)
             val childDirectory = when (operation) {
-                BisyncStateStore.PREVIEW -> File(directory, "previews/$id")
                 BisyncStateStore.INITIALISE -> File(directory, "baselines/$id")
                 BisyncStateStore.RUN -> {
-                    val baseline = BisyncStateStore.baselineForRun(state.read(), fingerprint)
+                    val baseline = BisyncStateStore.baselineForRun(state.read(), fingerprint, recoveryEnabled)
                     File(directory, "baselines/$baseline").also {
                         require(it.isDirectory) { "The saved bisync baseline is missing. Review recovery before continuing." }
                     }
@@ -290,55 +286,33 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
                 else -> throw IllegalArgumentException("Unsupported bisync operation")
             }
             require(childDirectory.isDirectory || childDirectory.mkdirs()) { "Cannot create bisync working folder" }
-            if (advisory) {
-                val baseline = BisyncStateStore.baselineForRun(state.read(), fingerprint)
-                val source = File(directory, "baselines/$baseline")
-                require(source.isDirectory) { "The saved baseline is missing" }
-                // Dry-run may write temporary listings. Copy the listings and the
-                // engine's verified pair identity, never its live OS lock inodes.
-                val savedFiles = requireNotNull(source.listFiles()) { "Cannot read the saved baseline" }
-                val identities = savedFiles.filter {
-                    it.isFile && it.name.matches(Regex("bisync-identity-[0-9a-f]{64}\\.lck-guard"))
-                }
-                require(identities.size == 1 && identities.single().length() in 1..65536) {
-                    "The saved baseline has no unambiguous endpoint identity. Review initialisation again."
-                }
-                (savedFiles.filter { it.isFile && it.name.endsWith(".lst") } + identities).forEach {
-                    it.copyTo(File(childDirectory, it.name), overwrite = false)
-                }
-            }
             // Parse every custom flag against the exact bundled engine before authentication or mutation.
             publishPhase("Checking rclone flags")
-            val check = execute(mRclone.bisync(task, childDirectory, engineOperation, filters, true), false)
-            previewProcessExited = check.exited
+            val check = execute(mRclone.bisync(task, childDirectory, operation, filters, true), false)
             require(check.success()) { detail.ifBlank { "The selected engine rejected a task option" } }
             diagnostics.setLength(0)
             exitCode = null
-            state.begin(operation, fingerprint, inputData.getString(BISYNC_APPROVAL), id.toString())
+            state.begin(operation, fingerprint, inputData.getString(BISYNC_APPROVAL), id.toString(), recoveryEnabled)
             var success = false
             try {
                 if (isStopped || cancelled) throw InterruptedException("Cancelled before bisync started")
-                previewProcessExited = false
-                val child = mRclone.bisync(task, childDirectory, engineOperation, filters, false)
+                val child = mRclone.bisync(task, childDirectory, operation, filters, false)
                 currentProcess = child
                 // launch registered its native lease under the same lock, so configuration
                 // writers stay excluded after preparation releases its thread-bound lock.
                 preparation.close()
-                publishPhase(if (operation == BisyncStateStore.PREVIEW) "Preview: connecting and scanning files"
-                    else if (operation == BisyncStateStore.INITIALISE) "Initialising: connecting and scanning files"
+                publishPhase(if (operation == BisyncStateStore.INITIALISE) "Resync: connecting and scanning files"
                     else "Bisync: connecting and scanning files")
                 val outcome = execute(child, true)
-                previewProcessExited = outcome.exited
                 success = outcome.success() && !isStopped && !cancelled
                 completed = success
-                if (success && operation != BisyncStateStore.PREVIEW) sendUploadFinishedBroadcast(task.remoteId, task.remotePath)
+                if (success) sendUploadFinishedBroadcast(task.remoteId, task.remotePath)
             } finally {
                 state.finish(operation, fingerprint, id.toString(), success && !isStopped && !cancelled,
-                    exitCode, detail, diagnosticText())
+                    exitCode, detail)
             }
         } finally {
-            try { previewRoot?.let { BisyncPolicy.retirePreview(it, id.toString(), previewProcessExited) } }
-            finally { preparation.close() }
+            preparation.close()
         }
     }
 
@@ -435,9 +409,7 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
         if (notifyResult) when {
             cancelled -> mNotificationManager.showCancelledNotificationOrReport(mTitle, notificationId, task.id)
             completed -> mNotificationManager.showSuccessNotificationOrReport(mTitle,
-                if (advisoryPreview) "Preview complete. The existing baseline is unchanged."
-                else if (operation == BisyncStateStore.PREVIEW) "Preview ready. Open the task to review and approve initialisation."
-                else "Transfer completed successfully", notificationId)
+                "Transfer completed successfully", notificationId)
             else -> mNotificationManager.showFailedNotificationOrReport(mTitle, detail, notificationId, task.id)
         }
         SyncLog.info(mContext, mTitle, "$status: $detail")

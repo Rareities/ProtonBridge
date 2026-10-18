@@ -26,6 +26,7 @@ public class StreamingService extends IntentService {
     public static final String REMOTE_ARG = "io.github.rareities.protonbridge.streaming_service.arg2";
     public static final String SHOW_NOTIFICATION_TEXT = "io.github.rareities.protonbridge.streaming_service.arg3";
     public static final String SERVE_PORT = "io.github.rareities.protonbridge.streaming_service.arg4";
+    public static final String SERVE_BASE_URL = "io.github.rareities.protonbridge.streaming_service.base_url";
     public static final String SERVE_PROTOCOL = "io.github.rareities.protonbridge.serve_protocol";
     public static final String ALLOW_REMOTE_ACCESS = "io.github.rareities.protonbridge.allow_remote_access";
     public static final String AUTHENTICATION_USERNAME = "io.github.rareities.protonbridge.username";
@@ -68,6 +69,7 @@ public class StreamingService extends IntentService {
         final Boolean allowRemoteAccess = intent.getBooleanExtra(ALLOW_REMOTE_ACCESS, false);
         final String authenticationUsername = intent.getStringExtra(AUTHENTICATION_USERNAME);
         final String authenticationPassword = intent.getStringExtra(AUTHENTICATION_PASSWORD);
+        final String baseUrl = intent.getStringExtra(SERVE_BASE_URL);
 
         int flags = 0;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -87,7 +89,9 @@ public class StreamingService extends IntentService {
                 .addAction(R.drawable.ic_cancel_download, getString(R.string.cancel), cancelPendingIntent);
 
         if (showNotificationText) {
-            Uri uri = Uri.parse("http://127.0.0.1:" + port);
+            Uri.Builder address = Uri.parse("http://127.0.0.1:" + port).buildUpon();
+            if (baseUrl != null && !baseUrl.isEmpty()) address.appendPath(baseUrl);
+            Uri uri = address.build();
             Intent webPageIntent = new Intent(Intent.ACTION_VIEW, uri);
             webPageIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
             PendingIntent webPagePendingIntent = PendingIntent.getActivity(this, 0, webPageIntent, flags);
@@ -100,17 +104,17 @@ public class StreamingService extends IntentService {
         try {
         switch (protocol) {
             case SERVE_FTP:
-                runningProcess = rclone.serve(Rclone.SERVE_PROTOCOL_FTP, port, allowRemoteAccess, authenticationUsername, authenticationPassword, remote, servePath);
+                runningProcess = rclone.serve(Rclone.SERVE_PROTOCOL_FTP, port, allowRemoteAccess, authenticationUsername, authenticationPassword, remote, servePath, baseUrl);
                 break;
             case SERVE_WEBDAV:
-                runningProcess = rclone.serve(Rclone.SERVE_PROTOCOL_WEBDAV, port, allowRemoteAccess, authenticationUsername, authenticationPassword, remote, servePath);
+                runningProcess = rclone.serve(Rclone.SERVE_PROTOCOL_WEBDAV, port, allowRemoteAccess, authenticationUsername, authenticationPassword, remote, servePath, baseUrl);
                 break;
             case SERVE_DLNA:
-                runningProcess = rclone.serve(Rclone.SERVE_PROTOCOL_DLNA, port, allowRemoteAccess, authenticationUsername, authenticationPassword, remote, servePath);
+                runningProcess = rclone.serve(Rclone.SERVE_PROTOCOL_DLNA, port, allowRemoteAccess, authenticationUsername, authenticationPassword, remote, servePath, baseUrl);
                 break;
             case SERVE_HTTP:
             default:
-                runningProcess = rclone.serve(Rclone.SERVE_PROTOCOL_HTTP, port, allowRemoteAccess, authenticationUsername, authenticationPassword, remote, servePath);
+                runningProcess = rclone.serve(Rclone.SERVE_PROTOCOL_HTTP, port, allowRemoteAccess, authenticationUsername, authenticationPassword, remote, servePath, baseUrl);
                 break;
         }
 
@@ -119,10 +123,13 @@ public class StreamingService extends IntentService {
         transfer.output().close();
         transfer.awaitSuccessfulExit();
         } catch (Exception error) {
-            FLog.e(TAG, "Streaming stopped: %s", io.github.rareities.protonbridge.util.DiagnosticRedactor.redact(error.getMessage()));
+            String raw = error.getMessage() == null ? "Listener failed" : error.getMessage();
+            final String diagnostic = io.github.rareities.protonbridge.util.DiagnosticRedactor.redact(
+                    baseUrl == null || baseUrl.isEmpty() ? raw : raw.replace(baseUrl, "[REDACTED]"));
+            FLog.e(TAG, "Streaming stopped: %s", diagnostic);
             new android.os.Handler(android.os.Looper.getMainLooper()).post(() ->
                     android.widget.Toast.makeText(getApplicationContext(), "Streaming stopped: " +
-                            io.github.rareities.protonbridge.util.DiagnosticRedactor.redact(error.getMessage()), android.widget.Toast.LENGTH_LONG).show());
+                            diagnostic, android.widget.Toast.LENGTH_LONG).show());
         } finally { stopForeground(true); }
     }
 

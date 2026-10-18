@@ -6,7 +6,7 @@ on:
       release_tag:
         description: 'Reviewed stable or release candidate tag, with a matching section in docs/FORK_CHANGELOG.md'
         required: true
-        default: 'v1.2.0'
+        default: 'v1.2.1'
 
 permissions:
   contents: read

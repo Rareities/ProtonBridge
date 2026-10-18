@@ -56,8 +56,6 @@ class TaskEditorControls(
     private val checkAccess = activity.findViewById<Switch>(R.id.bisync_check_access)
     private val backupLocal = activity.findViewById<EditText>(R.id.bisync_backup_local)
     private val backupRemote = activity.findViewById<EditText>(R.id.bisync_backup_remote)
-    private val preview = activity.findViewById<Button>(R.id.bisync_preview_button)
-    private val previewReport = activity.findViewById<Button>(R.id.bisync_preview_report_button)
     private val approve = activity.findViewById<Button>(R.id.bisync_initialize_button)
     private val charging = activity.findViewById<Switch>(R.id.task_charging_only)
     private val battery = activity.findViewById<Switch>(R.id.task_battery_not_low)
@@ -83,13 +81,7 @@ class TaskEditorControls(
             advanced.visibility = if (expanded) View.VISIBLE else View.GONE
             (button as Button).setText(if (expanded) R.string.bisync_advanced_hide else R.string.bisync_advanced_show)
         }
-        preview.setOnClickListener {
-            val task = persist() ?: return@setOnClickListener
-            observe(task)
-            SyncManager(activity).previewBisync(task.id)
-        }
         approve.setOnClickListener { review() }
-        previewReport.setOnClickListener { showLastPreview() }
         run.setOnClickListener {
             val task = persist() ?: return@setOnClickListener
             observe(task)
@@ -172,7 +164,6 @@ class TaskEditorControls(
         verificationError = null
         run.isEnabled = false
         approve.isEnabled = false
-        previewReport.isEnabled = false
         if (panel.visibility == View.VISIBLE) refresh()
     }
 
@@ -185,12 +176,18 @@ class TaskEditorControls(
         refresh()
     }
 
-    private fun currentFingerprint(task: Task, stopped: () -> Boolean): String {
+    private fun currentFingerprint(task: Task, savedState: JSONObject? = null, stopped: () -> Boolean): String {
         val filters = task.filterId?.takeIf { it >= 0 }?.let { id ->
             requireNotNull(DatabaseHandler(activity).getFilter(id)) { "The selected filter no longer exists" }.getFilters()
         } ?: arrayListOf()
         val effective = BisyncPolicy.effectiveTask(task, rclone.taskTransfers(task))
-        return BisyncPolicy.fingerprint(effective, filters, rclone.configurationIdentity { stopped() })
+        val configIdentity = rclone.configurationIdentity { stopped() }
+        val fingerprint = BisyncPolicy.fingerprint(effective, filters, configIdentity)
+        if (savedState != null) {
+            val legacy = BisyncPolicy.legacyFingerprint(effective, filters, configIdentity)
+            if (BisyncStateStore.isReady(savedState, legacy)) return legacy
+        }
+        return fingerprint
     }
 
     private fun verifyInBackground(task: Task, state: JSONObject, key: String) {
@@ -200,7 +197,7 @@ class TaskEditorControls(
         activity.lifecycleScope.launch {
             val job = currentCoroutineContext()
             val checked = withContext(Dispatchers.IO) {
-                runCatching { currentFingerprint(task) { !job.isActive } }
+                runCatching { currentFingerprint(task, state) { !job.isActive } }
             }
             if (checkingKey != key || verificationRevision != revision || activity.isFinishing) return@launch
             // A file can change while the engine identity is being checked.
@@ -247,49 +244,35 @@ class TaskEditorControls(
 
     fun refresh() {
         val task = taskProvider()
-        var reportEnabled = false
         var runEnabled = !active && panel.visibility != View.VISIBLE
         var approvalEnabled = false
-        preview.isEnabled = !active
         if (task != null && BisyncPolicy.isBisync(task) && task.bisyncUUID.isNotEmpty()) {
             try {
                 val state = BisyncStateStore(BisyncPolicy.workdir(activity, task)).read()
-                reportEnabled = !active && state.optLong("previewAt") > 0 && state.optString("preview").isNotBlank()
                 val code = state.optString("status", BisyncStateStore.NEEDS_INITIALISATION)
                 val current = draftMatchesSaved(task)
-                val checkable = current && !active &&
-                    (code == BisyncStateStore.READY || code == BisyncStateStore.PREVIEW_READY)
+                val checkable = current && !active
                 val key = "${task.asJSON()}|${state}"
                 val verified = checkable && verificationKey == key &&
                     SystemClock.elapsedRealtime() - verifiedAt in 0..15_000L
                 val fingerprint = if (verified) verifiedFingerprint else null
-                val canRun = fingerprint != null && BisyncStateStore.isReady(state, fingerprint)
-                // This button opens a review, not a native operation. A completed
-                // preview is enough to open it; review() and the worker still check
-                // the current fingerprint before approval/initialization.
-                val canReview = BisyncStateStore.isPreviewApproved(state, state.optString("previewFingerprint"))
-                val canApprove = fingerprint != null && BisyncStateStore.isPreviewApproved(state, fingerprint)
+                val canRun = fingerprint != null && BisyncStateStore.isRunnable(state, fingerprint,
+                    AdvancedOptions.recoveryEnabled(task.bisyncAdvancedOptions))
                 val label = if (active) {
                     if (!activeWorkMessage.isNullOrBlank()) "${activeWorkMessage}. Cancel below to stop it."
                     else if (activeWorkState == WorkInfo.State.RUNNING)
                         "Task running. Wait for it to finish, or cancel it below."
                     else "Task queued: waiting for network, charging or Android to start it. Cancel the queued task below to start over."
-                } else when (code) {
-                    BisyncStateStore.READY, BisyncStateStore.PREVIEW_READY -> when {
-                        !current -> "Unsaved baseline settings. Save and preview again before running."
-                        !verified -> if (canReview) "Preview complete. Tap Review and initialise to check and approve it."
-                            else "Checking saved task and remote settings"
-                        verificationError != null -> "Could not check saved settings: $verificationError. Close active operations and reopen this task to retry."
-                        canRun -> "Ready"
-                        canApprove -> "Preview ready for review"
-                        code == BisyncStateStore.PREVIEW_READY && !BisyncStateStore.isPreviewApproved(
-                            state, state.optString("previewFingerprint")) -> "Preview expired. Run a new preview."
-                        else -> "Settings or engine changed. Save and preview a new baseline."
-                    }
-                    BisyncStateStore.NEEDS_RECOVERY -> "Recovery review required"
-                    "RUNNING", "INITIALISING", "PREVIEWING" -> if (active) code.lowercase().replaceFirstChar { it.titlecase() }
-                        else "Interrupted. Review a new preview before continuing."
-                    else -> "Start with Save and preview. Review and initialise becomes available after a successful preview."
+                } else when {
+                    !current -> "Unsaved settings. Resync saves and confirms a new baseline."
+                    !verified -> "Checking saved task and remote settings"
+                    verificationError != null -> "Could not check saved settings: $verificationError. Close active operations and reopen this task to retry."
+                    canRun && code == BisyncStateStore.READY -> "Ready"
+                    canRun -> "Recovery enabled for the matching saved baseline. Run lets rclone validate and recover its listings."
+                    code == BisyncStateStore.READY -> "Settings or engine changed. Confirm Resync to create a new baseline."
+                    code in setOf(BisyncStateStore.NEEDS_RECOVERY, "RUNNING", "INITIALISING") ->
+                        "Previous run incomplete. Enable recover or resilient for a matching baseline, or confirm Resync."
+                    else -> "Select Resync to review settings and create the first baseline."
                 }
                 val lastSuccess = state.optLong("lastSuccessfulRun")
                 val last = if (lastSuccess > 0) activity.getString(R.string.bisync_last_success, date(lastSuccess))
@@ -302,18 +285,17 @@ class TaskEditorControls(
                     if (lastRecord?.optString("status") in setOf("FAILED", "CANCELLED", "NEEDS_USER_ACTION"))
                         status.append("\nLast attempt: " + lastRecord?.optString("message").orEmpty().take(600))
                 }
-                approvalEnabled = !active && canReview
+                approvalEnabled = !active
                 runEnabled = !active && current && canRun
                 if (checkable && !verified) verifyInBackground(task, state, key)
-            } catch (e: Exception) { status.text = "Review and save this task before initialising bisync"; runEnabled = false }
+            } catch (e: Exception) { status.text = "Review and save this task before Resync"; runEnabled = false; approvalEnabled = !active }
         } else {
-            status.text = if (active) "Task queued or running. Cancel it below before starting another preview."
-                else "Save this task, then tap Save and preview to begin."
-            if (panel.visibility == View.VISIBLE) runEnabled = false
+            status.text = if (active) "Task queued or running. Cancel it below before starting Resync."
+                else "Select Resync to save this task and confirm its settings."
+            if (panel.visibility == View.VISIBLE) { runEnabled = false; approvalEnabled = !active }
         }
         // Temporarily disabling an unchanged action cancels Android's queued
         // click callback. Apply only the final availability once per refresh.
-        previewReport.isEnabled = reportEnabled
         run.isEnabled = runEnabled
         approve.isEnabled = approvalEnabled
         val schedules = task?.let { saved -> DatabaseHandler(activity).allTrigger.filter { it.triggerTarget == saved.id } }.orEmpty()
@@ -330,19 +312,26 @@ class TaskEditorControls(
             val job = currentCoroutineContext()
             val checked = withContext(Dispatchers.IO) {
                 runCatching {
-                    val state = BisyncStateStore(BisyncPolicy.workdir(activity, task)).read()
-                    val fingerprint = currentFingerprint(task) { !job.isActive }
-                    require(BisyncStateStore.isPreviewApproved(state, fingerprint)) {
-                        "Preview expired or task, filter, engine or remote configuration changed. Run a new preview."
-                    }
-                    state to fingerprint
+                    BisyncPolicy.validate(activity, task)
+                    currentFingerprint(task) { !job.isActive }
                 }
             }
             if (!job.isActive || activity.isFinishing) return@launch
             refresh()
-            val (state, approval) = checked.getOrElse { error(it.message); return@launch }
-            val summary = "Local: ${task.localPath}\nRemote: ${task.remoteId}:${task.remotePath}\n" +
-                "Preference: ${if (task.bisyncResyncMode == "path1") "local" else "remote"}\n\n" + state.optString("preview")
+            val approval = checked.getOrElse { error(it.message); return@launch }
+            val filters = task.filterId?.takeIf { it >= 0 }?.let { id ->
+                DatabaseHandler(activity).getFilter(id)?.getFiltersRaw()
+            }.orEmpty()
+            val summary = io.github.rareities.protonbridge.util.DiagnosticRedactor.redact(
+                "Local: ${task.localPath}\nRemote: ${task.remoteId}:${task.remotePath}\n" +
+                "Preference: ${if (task.bisyncResyncMode == "path1") "local" else "remote"}\n" +
+                "Maximum deletions during normal runs: ${task.bisyncMaxDelete}%\n" +
+                "Require access markers: ${task.bisyncCheckAccess}\n" +
+                "Local backups: ${task.bisyncBackupDir1.ifBlank { "none" }}\n" +
+                "Remote backups: ${task.bisyncBackupDir2.ifBlank { "none" }}\n" +
+                "Transfers: ${rclone.taskTransfers(task)}\n" +
+                "Filters: ${filters.ifBlank { "none" }}\n" +
+                "Advanced options:\n${task.bisyncAdvancedOptions.ifBlank { "defaults" }}")
             val content = selectableText(activity.getString(R.string.bisync_review_warning, summary))
             AlertDialog.Builder(activity).setTitle(R.string.bisync_review_title).setView(content)
                 .setNegativeButton(android.R.string.cancel, null)
@@ -351,18 +340,6 @@ class TaskEditorControls(
                     observe(task)
                 }.show()
         }
-    }
-
-    private fun showLastPreview() {
-        val task = taskProvider() ?: return
-        try {
-            val state = BisyncStateStore(BisyncPolicy.workdir(activity, task)).read()
-            val report = state.optString("preview")
-            if (report.isBlank()) { error("Run a preview first"); return }
-            val summary = activity.getString(R.string.bisync_saved_preview, date(state.optLong("previewAt")), report)
-            AlertDialog.Builder(activity).setTitle(R.string.bisync_view_preview)
-                .setView(selectableText(summary)).setPositiveButton(android.R.string.ok, null).show()
-        } catch (failure: Exception) { error(failure.message ?: "Could not read the saved preview") }
     }
 
     private fun schedules() {

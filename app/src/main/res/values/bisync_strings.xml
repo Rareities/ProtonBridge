@@ -29,11 +29,8 @@
     <string name="proxy_secret_summary">Password is protected by Android Keystore. Enter a replacement, or leave blank to remove it.</string>
     <string name="proxy_secret_saved">Protected proxy password saved.</string>
     <string name="proxy_secret_failed">Could not protect or unlock the proxy password. Re-enter it before using the proxy.</string>
-    <string name="bisync_preview">1. Save and preview</string>
-    <string name="bisync_view_preview">View last preview</string>
-    <string name="bisync_saved_preview">Preview captured: %1$s\nThis is the saved advisory report, not a fresh scan or approval. Settings and remote contents may have changed.\n\n%2$s</string>
-    <string name="bisync_review">2. Review and initialise</string>
-    <string name="bisync_preview_help">Start here. Preview saves your task and checks what would change without transferring or deleting files. Wait for it to finish successfully, then review and initialise. Ready tasks preview normal changes without altering their baseline. New or changed tasks preview initialisation and require approval within 30 minutes. A preview may refresh credentials and is not a snapshot of cloud contents.</string>
+    <string name="bisync_review">Resync</string>
+    <string name="bisync_resync_help">Start with Resync to save the task, confirm its settings and create a baseline. Resync transfers files and may overwrite different versions according to the selected preference. Once ready, use Run for normal two-way synchronisation.</string>
     <string name="bisync_advanced_show">Advanced settings (optional)</string>
     <string name="bisync_advanced_hide">Hide advanced settings</string>
     <string name="bisync_advanced_help">Defaults are enough to start. Type custom flags below if needed. The reference lists the bundled engine flags and explains them.</string>
@@ -42,9 +39,9 @@
     <string name="bisync_status_format">State: %1$s\n%2$s</string>
     <string name="bisync_last_success">Last successful run: %1$s</string>
     <string name="bisync_never_run">No successful baseline yet</string>
-    <string name="bisync_review_title">Approve initialisation</string>
-    <string name="bisync_review_warning">Check the preview below and your backups. Initialisation can overwrite differing files according to the selected preference. Remote contents may change after this preview.\n\n%1$s</string>
-    <string name="bisync_approve">Approve and initialise</string>
+    <string name="bisync_review_title">Confirm Resync</string>
+    <string name="bisync_review_warning">Check these settings and your backups. Resync combines both folders and creates a new baseline. It can overwrite differing files according to the selected preference. The normal deletion limit does not limit these overwrites.\n\n%1$s</string>
+    <string name="bisync_approve">Confirm Resync</string>
     <string name="bisync_run">Save and run task</string>
     <string name="bisync_schedule">Manage schedules</string>
     <string name="bisync_history">Run history</string>
@@ -72,7 +69,7 @@
     <string name="task_unmetered_help">Wait for a network Android marks as unmetered, usually Wi-Fi or Ethernet. Metered Wi-Fi is excluded.</string>
     <string name="bisync_checksum_required">Checksums required for bisync</string>
     <string name="bisync_checksum_help">Compares file size and a common checksum. Missing checksums stop the run rather than silently reducing protection.</string>
-    <string name="bisync_reference_help">Local reference from the bundled rclone engine, with flag descriptions and defaults. It does not run a sync or connect to your account. Search by name or explanation. Some flags are managed by the task controls or belong in the remote editor and cannot be overridden here. For example, --conflict-resolve newer prefers the newer file while preserving the losing version as a numbered conflict copy. Changing flags requires saving and reviewing a fresh preview.</string>
+    <string name="bisync_reference_help">Local reference from the bundled rclone engine, with flag descriptions and defaults. It does not run a sync or connect to your account. Search by name or explanation. Some flags are managed by the task controls or belong in the remote editor and cannot be overridden here. For example, --conflict-resolve newer prefers the newer file while preserving the losing version as a numbered conflict copy. Changing listing policy requires confirming Resync; recover and resilient can be enabled for an existing matching baseline.</string>
     <string name="bisync_reference_search">Search flags or explanations</string>
     <string name="bisync_reference_no_matches">No matching flags</string>
 </resources>

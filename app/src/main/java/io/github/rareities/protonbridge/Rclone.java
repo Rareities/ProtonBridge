@@ -262,6 +262,7 @@ public class Rclone {
 
     @Nullable
     public List<FileItem> getDirectoryContent(RemoteItem remote, String path, boolean startAtRoot) {
+        if (remote == null) return null;
         String remoteAndPath = remote.getName() + ":";
         if (startAtRoot) {
             remoteAndPath += "/";
@@ -658,6 +659,11 @@ public class Rclone {
     }
     
     public Process config(String task, List<String> options) {
+        if (("create".equals(task) || "update".equals(task)) &&
+                (options.isEmpty() || !io.github.rareities.protonbridge.util.RemoteNamePolicy.isValid(options.get(0)))) {
+            FLog.w(TAG, "Configuration rejected an invalid remote name");
+            return null;
+        }
         invalidateRemotesCache();
         String[] command = createCommand("config", task);
         String[] opt = options.toArray(new String[0]);
@@ -706,8 +712,9 @@ public class Rclone {
     }
 
     public void deleteRemote(String remoteName) {
+        if (!io.github.rareities.protonbridge.util.RemoteNamePolicy.isValid(remoteName)) return;
         invalidateRemotesCache();
-        String[] command = createCommandWithOptions("config", "delete", remoteName);
+        String[] command = createCommandWithOptions("config", "delete", "--", remoteName);
         Process process;
 
         try {
@@ -872,8 +879,9 @@ public class Rclone {
         defaultParameter.addAll(io.github.rareities.protonbridge.util.FilterRules.arguments(filters, java.util.Collections.emptyList()));
 
         ArrayList<String> directionParameter = new ArrayList<>();
-        Collections.addAll(directionParameter, op, srcSection, dstSection);
+        directionParameter.add(op);
         directionParameter.addAll(defaultParameter);
+        Collections.addAll(directionParameter, "--", srcSection, dstSection);
         command = createCommandWithOptions(directionParameter);
 
         String[] env = getRcloneEnv();
@@ -899,7 +907,7 @@ public class Rclone {
         } catch (NumberFormatException invalid) { throw new IllegalArgumentException("Choose a positive transfer count in task or app settings"); }
     }
 
-    /** One argument builder supplies native execution and the explicit expert preview. */
+    /** One argument builder supplies native execution and flag validation. */
     public String[] bisyncArguments(io.github.rareities.protonbridge.Items.Task task, File privateWorkdir,
                                    String operation, ArrayList<FilterEntry> filters, boolean validateOnly) throws IOException {
         java.util.List<String> advanced = io.github.rareities.protonbridge.util.AdvancedOptions.parse(task.getBisyncAdvancedOptions());
@@ -927,10 +935,12 @@ public class Rclone {
                 "--protondrive-original-file-size=true", "--protondrive-replace-existing-draft=false",
                 "--protondrive-enable-caching=false");
         if (compareModtime) args.add("--local-no-set-modtime=false");
-        if (!operation.equals("run") && !operation.equals("preview-existing")) {
+        if (!operation.equals("run") && !operation.equals("initialise")) {
+            throw new IllegalArgumentException("Unknown bisync operation");
+        }
+        if (operation.equals("initialise")) {
             args.add("--resync-mode=" + task.getBisyncResyncMode());
         }
-        if (operation.equals("preview") || operation.equals("preview-existing")) args.add("--dry-run");
         if (task.getBisyncCheckAccess()) args.add("--check-access");
         if (!task.getBisyncBackupDir1().isEmpty()) args.add("--backup-dir1=" + task.getBisyncBackupDir1());
         if (!task.getBisyncBackupDir2().isEmpty()) args.add("--backup-dir2=" + task.getBisyncBackupDir2());
@@ -1036,20 +1046,24 @@ public class Rclone {
         defaultParameter.addAll(io.github.rareities.protonbridge.util.FilterRules.arguments(filters, java.util.Collections.emptyList()));
 
         if (syncDirection == SyncDirectionObject.SYNC_LOCAL_TO_REMOTE) {
-            Collections.addAll(directionParameter, "sync", localPath, remoteSection);
+            directionParameter.add("sync");
             directionParameter.addAll(defaultParameter);
+            Collections.addAll(directionParameter, "--", localPath, remoteSection);
             command = createCommandWithOptions(directionParameter);
         } else if (syncDirection == SyncDirectionObject.SYNC_REMOTE_TO_LOCAL) {
-            Collections.addAll(directionParameter, "sync", remoteSection, localPath);
+            directionParameter.add("sync");
             directionParameter.addAll(defaultParameter);
+            Collections.addAll(directionParameter, "--", remoteSection, localPath);
             command = createCommandWithOptions(directionParameter);
         } else if (syncDirection == SyncDirectionObject.COPY_LOCAL_TO_REMOTE) {
-            Collections.addAll(directionParameter, "copy", localPath, remoteSection);
+            directionParameter.add("copy");
             directionParameter.addAll(defaultParameter);
+            Collections.addAll(directionParameter, "--", localPath, remoteSection);
             command = createCommandWithOptions(directionParameter);
         }else if (syncDirection == SyncDirectionObject.COPY_REMOTE_TO_LOCAL) {
-            Collections.addAll(directionParameter, "copy", remoteSection, localPath);
+            directionParameter.add("copy");
             directionParameter.addAll(defaultParameter);
+            Collections.addAll(directionParameter, "--", remoteSection, localPath);
             command = createCommandWithOptions(directionParameter);
         }else {
             return null;
@@ -1484,7 +1498,8 @@ public class Rclone {
     }
 
     public Process reconnectRemote(RemoteItem remoteItem) {
-        String[] command = createCommand("config", "update", remoteItem.getName());
+        if (remoteItem == null || !io.github.rareities.protonbridge.util.RemoteNamePolicy.isValid(remoteItem.getName())) return null;
+        String[] command = createCommand("config", "update", "--", remoteItem.getName());
 
         try {
             return getRuntimeProcess(command, getRcloneEnv());
@@ -1568,8 +1583,10 @@ public class Rclone {
     /** Optional health checks must not keep a radio/process alive indefinitely. */
     public DirectoryProbeResult listDirectories(String remoteName, int maxDepth,
                                                 io.github.rareities.protonbridge.util.ProcessRunner.StopCheck stop) {
+        if (!io.github.rareities.protonbridge.util.RemoteNamePolicy.isValid(remoteName))
+            return new DirectoryProbeResult(1, "Invalid remote name");
         String[] command = createCommand("lsd", "--max-depth", String.valueOf(maxDepth),
-                "--retries=1", "--low-level-retries=1", "--contimeout=10s", "--timeout=20s", remoteName + ":");
+                "--retries=1", "--low-level-retries=1", "--contimeout=10s", "--timeout=20s", "--", remoteName + ":");
         StringBuilder errors = new StringBuilder();
         try {
             io.github.rareities.protonbridge.util.ProcessRunner.Outcome outcome =

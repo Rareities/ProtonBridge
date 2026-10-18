@@ -203,37 +203,6 @@ class TaskWorkflowIntegrationTest {
         }
     }
 
-    @Test fun unchangedRefreshDoesNotCancelAPreviewButtonPress() {
-        val task = db.getTask(createSavedBisync())!!
-        val store = io.github.rareities.protonbridge.util.BisyncStateStore(
-            io.github.rareities.protonbridge.util.BisyncPolicy.workdir(app, task))
-        store.begin("preview", "fixture", null, "fixture-run")
-        store.finish("preview", "fixture", "fixture-run", true, 0, "Preview complete", "left-change.txt")
-        val intent = Intent(app, TaskActivity::class.java).putExtra(TaskActivity.ID_EXTRA, task.id)
-        Robolectric.buildActivity(TaskActivity::class.java, intent).setup().use { controller ->
-            val activity = controller.get()
-            val controls = TaskActivity::class.java.getDeclaredField("taskControls").let {
-                it.isAccessible = true
-                it.get(activity) as TaskEditorControls
-            }
-            val button = activity.findViewById<android.widget.Button>(R.id.bisync_preview_report_button)
-            assertTrue(button.isEnabled)
-            button.layout(0, 0, 400, 100)
-            val now = android.os.SystemClock.uptimeMillis()
-            val down = android.view.MotionEvent.obtain(now, now, android.view.MotionEvent.ACTION_DOWN, 100f, 50f, 0)
-            val up = android.view.MotionEvent.obtain(now, now + 20, android.view.MotionEvent.ACTION_UP, 100f, 50f, 0)
-            try {
-                assertTrue(button.dispatchTouchEvent(down))
-                assertTrue(button.dispatchTouchEvent(up))
-            } finally { down.recycle(); up.recycle() }
-            controls.refresh()
-            assertTrue(button.isEnabled)
-            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
-            val dialog = org.robolectric.shadows.ShadowDialog.getLatestDialog()
-            assertNotNull("Refreshing an available action discarded its queued click", dialog)
-            assertTrue(dialog.isShowing)
-        }
-    }
     @Test fun advancedToolsStartCollapsedAndCanBeOpenedWithoutChangingSavedOptions() {
         val id = createSavedBisync()
         val before = db.getTask(id)!!.asJSON().toString()
@@ -251,16 +220,12 @@ class TaskWorkflowIntegrationTest {
         }
     }
 
-    @Test fun completedPreviewCanBeReviewedBeforeBackgroundIdentityCheckCompletes() {
+    @Test fun resyncIsAvailableWithoutPriorNativeOperation() {
         val task = db.getTask(createSavedBisync())!!
-        val store = io.github.rareities.protonbridge.util.BisyncStateStore(
-            io.github.rareities.protonbridge.util.BisyncPolicy.workdir(app, task))
-        store.begin("preview", "fixture", null, "preview-run")
-        store.finish("preview", "fixture", "preview-run", true, 0, "Preview complete", "test-file.txt")
         val launch = Intent(app, TaskActivity::class.java).putExtra(TaskActivity.ID_EXTRA, task.id)
         Robolectric.buildActivity(TaskActivity::class.java, launch).setup().use { controller ->
             val button = controller.get().findViewById<android.widget.Button>(R.id.bisync_initialize_button)
-            assertTrue("Review is available; click-time and worker checks still enforce identity", button.isEnabled)
+            assertTrue("Resync opens explicit settings confirmation", button.isEnabled)
         }
     }
 

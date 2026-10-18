@@ -78,24 +78,6 @@ object BisyncPolicy {
         return pieces.joinToString("/")
     }
 
-    /** Temporary preview listings are unnecessary after their native process exits. */
-    @JvmStatic fun retirePreview(directory: File, runId: String, confirmedExit: Boolean): Boolean {
-        if (!confirmedExit || !isValidIdentity(runId)) return false
-        return try {
-            val previews = File(directory, "previews")
-            val preview = File(previews, runId)
-            if (previews.canonicalFile != File(directory.canonicalFile, "previews").absoluteFile ||
-                preview.canonicalFile != File(previews.canonicalFile, runId).absoluteFile) return false
-            // Engine preview state is flat. Refuse nested/special entries and
-            // links outside this folder; never traverse a directory during cleanup.
-            val files = preview.listFiles() ?: return !preview.exists()
-            if (files.size > 128 || files.any { !it.isFile || it.canonicalFile.parentFile != preview.canonicalFile }) return false
-            for (file in files) if (!file.delete()) return false
-            preview.delete()
-        } catch (_: java.io.IOException) { false }
-        catch (_: SecurityException) { false }
-    }
-
     @JvmStatic fun overlaps(first: String, second: String): Boolean {
         val a = first.trimEnd('/', '\\')
         val b = second.trimEnd('/', '\\')
@@ -109,7 +91,15 @@ object BisyncPolicy {
         return Task.fromString(task.asJSON().toString()).apply { this.transfers = transfers }
     }
 
-    @JvmStatic fun fingerprint(task: Task, filters: List<FilterEntry>, configIdentity: String): String {
+    @JvmStatic fun fingerprint(task: Task, filters: List<FilterEntry>, configIdentity: String): String =
+        fingerprint(task, filters, configIdentity, false)
+
+    /** Exact pre-recovery-policy hash, only for recognising an unchanged saved READY baseline. */
+    @JvmStatic fun legacyFingerprint(task: Task, filters: List<FilterEntry>, configIdentity: String): String =
+        fingerprint(task, filters, configIdentity, true)
+
+    private fun fingerprint(task: Task, filters: List<FilterEntry>, configIdentity: String,
+                            includeRecoveryControls: Boolean): String {
         val values = listOf(
             "bisync-policy-v5", normalisedMode(task.direction), task.bisyncUUID,
             File(task.localPath).canonicalPath,
@@ -117,7 +107,10 @@ object BisyncPolicy {
             task.bisyncResyncMode, task.bisyncCheckAccess.toString(), task.bisyncBackupDir1,
             task.bisyncBackupDir2, task.transfers?.toString() ?: "default", task.deleteExcluded.toString(),
             BuildConfig.RCLONE_SOURCE_SHA, configIdentity
-        ) + parseFlags(task.bisyncAdvancedOptions) + filters.map { "${it.filterType}:${it.filter}" }
+        ) + parseFlags(task.bisyncAdvancedOptions).filterNot {
+            // Recovery controls act on the same listings, not a different file selection.
+            !includeRecoveryControls && it.substringBefore('=') in setOf("--recover", "--resilient")
+        } + filters.map { "${it.filterType}:${it.filter}" }
         val digest = MessageDigest.getInstance("SHA-256")
         for (value in values) {
             val bytes = value.toByteArray(Charsets.UTF_8)

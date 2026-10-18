@@ -137,10 +137,7 @@ class ReleasePackageDeviceTest {
             val state = BisyncStateStore(BisyncPolicy.workdir(context, saved))
             ActivityScenario.launch<MainActivity>(Intent(context, MainActivity::class.java)).use {
                 val manager = SyncManager(context)
-                manager.previewBisync(saved.id)
-                finished(saved)
-                assertFalse(File(right, "initial.txt").exists())
-                manager.initialiseBisync(saved.id, state.read().getString("previewFingerprint"))
+                manager.initialiseBisync(saved.id, resyncFingerprint(context, saved))
                 finished(saved)
                 assertEquals("release initial bytes", read(File(right, "initial.txt")))
                 write(File(left, "from-left.txt"), "L")

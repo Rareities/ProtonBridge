@@ -18,14 +18,14 @@ public final class AdvancedOptions {
             "timeout", "contimeout", "max-transfer", "max-duration", "min-size",
             "max-size", "filter", "include", "exclude", "suffix", "modify-window",
             "checkers", "max-connections", "buffer-size", "conflict-resolve"));
-    private static final Set<String> BOOLEAN = new HashSet<>(Arrays.asList("fast-list", "ignore-case", "check-first"));
+    private static final Set<String> BOOLEAN = new HashSet<>(Arrays.asList("fast-list", "ignore-case", "check-first", "recover", "resilient"));
     private static final Set<String> OWNED = new HashSet<>(Arrays.asList(
             "resync", "resync-mode", "workdir", "config", "force", "max-delete", "max-delete-size",
             "compare", "checksum", "require-checksum", "ignore-checksum", "ignore-listing-checksum",
             "ignore-size", "ignore-errors", "ignore-existing", "size-only", "dry-run", "interactive",
             "delete-excluded", "delete-before", "delete-during", "delete-after", "delete-only",
             "conflict-loser", "check-sync", "no-slow-hash", "slow-hash-sync-only",
-            "download-hash", "max-lock", "recover", "remove-empty-dirs", "local-no-check-updated",
+            "download-hash", "max-lock", "remove-empty-dirs", "local-no-check-updated",
             "local-no-set-modtime", "no-check-certificate", "insecure", "use-json-log", "help", "version", "bind", "addr",
             "backup-dir", "backup-dir1", "backup-dir2", "suffix", "suffix-keep-extension",
             "config-dir", "cache-dir", "cache-chunk-path", "cache-db-path", "temp-dir",
@@ -79,6 +79,8 @@ public final class AdvancedOptions {
                 if (Character.isISOControl(line.charAt(c))) throw new IllegalArgumentException("Control character in flag on line " + (i + 1));
             }
             String name = key.substring(2);
+            if ("recovery".equals(name) || "reselient".equals(name))
+                throw new IllegalArgumentException("Use rclone --recover and --resilient (not --recovery or --reselient)");
             String reason = restriction(name);
             if (reason != null) throw new IllegalArgumentException(reason);
             if (value != null && (Pattern.compile("(?i)[a-z][a-z0-9+.-]*://[^/\\s]+@").matcher(value).find() ||
@@ -118,6 +120,15 @@ public final class AdvancedOptions {
         }
         if (result.size() > 64) throw new IllegalArgumentException("Maximum 64 advanced options per task");
         return result;
+    }
+
+    /** Recovery uses the saved native listings; it never implies a resync. */
+    public static boolean recoveryEnabled(String input) {
+        for (String flag : parse(input)) {
+            if (flag.equals("--recover") || flag.equals("--recover=true") ||
+                    flag.equals("--resilient") || flag.equals("--resilient=true")) return true;
+        }
+        return false;
     }
 
     /** Rclone warns that an undersized connection cap can deadlock a transfer. */

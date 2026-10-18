@@ -1850,13 +1850,12 @@ public class FileExplorerFragment extends Fragment implements   FileExplorerRecy
         protected Boolean doInBackground(FileItem... fileItems) {
             FileItem fileItem = fileItems[0];
             mimeType = fileItem.getMimeType();
-            File[] extCacheDirs = ContextCompat.getExternalCacheDirs(context);
-            if (extCacheDirs.length < 1) {
-                return false;
-            }
-            String saveLocation = extCacheDirs[0].getAbsolutePath();
-
-            fileLocation = saveLocation + "/" + fileItem.getName();
+            final String saveLocation;
+            try {
+                File previewCache = io.github.rareities.protonbridge.util.PrivateFileStaging.directory(context.getCacheDir(), "preview");
+                fileLocation = io.github.rareities.protonbridge.util.PrivateFileStaging.target(previewCache, fileItem.getName()).getAbsolutePath();
+                saveLocation = previewCache.getAbsolutePath();
+            } catch (IOException invalidName) { return false; }
 
             process = rclone.downloadFile(remote, fileItem, saveLocation);
 
@@ -1958,12 +1957,17 @@ public class FileExplorerFragment extends Fragment implements   FileExplorerRecy
             serveIntent.putExtra(StreamingService.REMOTE_ARG, remote);
             serveIntent.putExtra(StreamingService.SHOW_NOTIFICATION_TEXT, false);
             serveIntent.putExtra(StreamingService.SERVE_PORT, port);
+            byte[] tokenBytes = new byte[16];
+            new SecureRandom().nextBytes(tokenBytes);
+            String streamToken = Base64.encodeToString(tokenBytes, Base64.NO_PADDING | Base64.NO_WRAP | Base64.URL_SAFE);
+            serveIntent.putExtra(StreamingService.SERVE_BASE_URL, streamToken);
             // GH-87: Release old stream
             context.stopService(new Intent(context, StreamingService.class));
             tryStartService(context, serveIntent);
 
             Uri uri = Uri.parse("http://127.0.0.1:" + port)
                     .buildUpon()
+                    .appendPath(streamToken)
                     .appendPath(fileItem.getName())
                     .build();
 
@@ -1994,16 +1998,9 @@ public class FileExplorerFragment extends Fragment implements   FileExplorerRecy
             while (waitTime > 0) {
                 long waitStart = System.nanoTime();
                 try {
-                    FLog.v(TAG, "doInBackground: HEAD %s", uri.toString());
-                    Response response = client.newCall(request).execute();
-                    code = response.code();
-
-                    if(BuildConfig.DEBUG) {
-                        Map<String, List<String>> headerFields =  response.headers().toMultimap();
-                        String headers = StreamSupport.stream(headerFields.keySet())
-                                .map(k -> k + '=' + headerFields.get(k))
-                                .collect(Collectors.joining(",", "{", "}"));
-                        FLog.v(TAG, "doInBackground: Response %s", headers);
+                    // The URL contains a bearer capability and must never enter diagnostics.
+                    try (Response response = client.newCall(request).execute()) {
+                        code = response.code();
                     }
                 } catch (IOException e) {
                     FLog.v(TAG, "doInBackground: Server not (yet) online");

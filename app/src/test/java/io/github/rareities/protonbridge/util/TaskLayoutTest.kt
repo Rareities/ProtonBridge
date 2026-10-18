@@ -26,12 +26,11 @@ class TaskLayoutTest {
         }
     }
 
-    @Test fun bisyncControlsInflateWithIndependentPreviewAndApproval() {
+    @Test fun bisyncControlsInflateWithDirectResync() {
         Robolectric.buildActivity(LayoutActivity::class.java).setup().use { controller ->
             val activity = controller.get()
             assertNotNull(activity.findViewById<EditText>(R.id.bisync_advanced_flags))
-            assertNotNull(activity.findViewById<Button>(R.id.bisync_preview_button))
-            assertFalse(activity.findViewById<Button>(R.id.bisync_initialize_button).isEnabled)
+            assertEquals("Resync", activity.findViewById<Button>(R.id.bisync_initialize_button).text.toString())
             assertEquals(2, activity.findViewById<Spinner>(R.id.bisync_precedence).count)
             assertNotNull(activity.findViewById<Button>(R.id.task_schedule_button))
             assertNotNull(activity.findViewById<EditText>(R.id.task_quiet_start))

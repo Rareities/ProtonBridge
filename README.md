@@ -43,7 +43,7 @@ and bisync approval. Stop old schedules before enabling equivalent new tasks.
 
 ## Features
 
-- Proton Drive folder bisync with preview, explicit initialisation approval, recovery state and scheduling.
+- Proton Drive folder bisync with direct Resync, native recovery flags and scheduling.
 - Browse, upload, download, move, rename and delete files across rclone-supported providers.
 - Stream media and serve files over FTP, HTTP, WebDAV or DLNA.
 - Crypt remotes, Storage Access Framework access, dark theme and Android 6+ support.
@@ -51,7 +51,7 @@ and bisync approval. Stop old schedules before enabling equivalent new tasks.
 
 ## Installation
 
-Download the [stable 1.2.0 release](https://github.com/Rareities/ProtonBridge/releases/tag/v1.2.0),
+Download the [stable 1.2.1 release](https://github.com/Rareities/ProtonBridge/releases/tag/v1.2.1),
 or browse all [ProtonBridge releases](https://github.com/Rareities/ProtonBridge/releases).
 Use `protonbridge_v<version>-oss-arm64-v8a-release.apk` for most phones, or
 `protonbridge_v<version>-oss-universal-release.apk` if unsure. ARM32, x86 and
@@ -62,9 +62,10 @@ are separate projects.
 ## Bisync setup
 
 Create a remote and a Bisync task, select your folders, then follow
-**Save and preview → Review and initialise → Run**. Review the initial winning
+**Resync → confirm settings → Run**. Review the initial winning
 side and deletion limits, and keep independent backups. Start with disposable
-folders. Changed flags require a fresh preview/review.
+folders. Resync immediately copies files after confirmation; there is no dry run.
+Changed folders, filters or listing policy require a new Resync.
 
 Enter one flag per line, for example:
 
@@ -76,14 +77,20 @@ Enter one flag per line, for example:
 `--flag=value` also works. Values are passed directly to rclone without shell
 interpretation. The reference explains the bundled engine's flags; credentials
 and app-managed safety options remain controlled by the remote/task editor.
+Use `--recover` and/or `--resilient` in the flag editor for recovery of a matching
+existing baseline. Their spelling is exactly as shown. Recovery flags do not
+require Resync just because they were added; rclone decides whether its saved
+listings are recoverable. They cannot create a first baseline or repair every
+failed Resync. A changed bundled engine requires a new Resync.
+
 See [usage, security, battery guidance and full change history](docs/FORK_CHANGELOG.md).
 
-Saved filters and task flags apply to preview, initialisation and regular sync.
+Saved filters and task flags apply to Resync and regular sync.
 In the filter editor, choose Exclude and enter `.nomedia` to skip only these
 Android media-scanner markers at every depth; `/.nomedia` matches only the sync
 root. `**/.nomedia` matches nested markers but misses the root marker. In the task flag editor, the equivalent is `--exclude .nomedia`.
 Basic excludes take priority; basic includes restrict all other files. After
-changing filters, save and preview again before reviewing initialisation.
+changing filters, confirm Resync to create a matching baseline.
 
 ## External task requests
 

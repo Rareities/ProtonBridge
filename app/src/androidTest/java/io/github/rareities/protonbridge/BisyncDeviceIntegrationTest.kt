@@ -69,10 +69,11 @@ class BisyncDeviceIntegrationTest {
         io.github.rareities.protonbridge.util.EngineProvenance.verify(context)
     }
 
-    private fun worker(task: Task, operation: String, approval: String? = null, revision: String? = null): SyncWorker {
+    private fun worker(task: Task, operation: String, approval: String? = null, revision: String? = null, automatic: Boolean = false): SyncWorker {
         val data = Data.Builder().putLong(SyncWorker.TASK_ID, task.id)
+            .putBoolean(SyncManager.AUTOMATIC, automatic)
             .putString("TASK_UUID", task.bisyncUUID).putString(SyncWorker.BISYNC_OPERATION, operation)
-            .putString(SyncWorker.BISYNC_APPROVAL, approval)
+            .putString(SyncWorker.BISYNC_APPROVAL, approval ?: if (operation == BisyncStateStore.INITIALISE) resyncFingerprint(context, task) else null)
             .putString(SyncManager.TASK_REVISION, revision ?: SyncManager.taskRevision(context, task)).build()
         return TestWorkerBuilder.from(context, SyncWorker::class.java, Executor { it.run() })
             .setForegroundUpdater(foreground).setInputData(data).build()
@@ -119,27 +120,33 @@ class BisyncDeviceIntegrationTest {
             remoteType = 0; wifionly = false; bisyncMaxDelete = 10
         })
         val store = BisyncStateStore(BisyncPolicy.workdir(context, task))
-        val beforeLeft = snapshot(left); val beforeRight = snapshot(right)
-        assertSuccess(task, BisyncStateStore.PREVIEW)
-        assertEquals(beforeLeft, snapshot(left)); assertEquals(beforeRight, snapshot(right))
-        assertEquals(BisyncStateStore.PREVIEW_READY, store.read().getString("status"))
-        assertSuccess(task, BisyncStateStore.INITIALISE, store.read().getString("previewFingerprint"))
+        assertSuccess(task, BisyncStateStore.INITIALISE)
         assertEquals(BisyncStateStore.READY, store.read().getString("status"))
         assertEquals(snapshot(left), snapshot(right))
 
         // Fresh wrapper/state objects emulate a cold in-process restart, not OS process death.
         val reopened = BisyncStateStore(BisyncPolicy.workdir(context, db.getTask(task.id)!!))
-        val baseline = reopened.read().getString("baselineId")
-        val baselineFiles = File(BisyncPolicy.workdir(context, task), "baselines/$baseline")
-        val baselineBeforePreview = snapshot(baselineFiles)
+        assertEquals(BisyncStateStore.READY, reopened.read().getString("status"))
         File(left, "local-added.txt").writeText("L")
         File(right, "remote-added.txt").writeText("R")
-        assertSuccess(task, BisyncStateStore.PREVIEW)
-        assertEquals(BisyncStateStore.READY, reopened.read().getString("status"))
-        assertEquals(baselineBeforePreview, snapshot(baselineFiles))
-        assertFalse(File(right, "local-added.txt").exists())
         assertSuccess(task, BisyncStateStore.RUN)
         assertEquals(snapshot(left), snapshot(right))
+
+        // A stale RUNNING marker models an app interruption, not damaged native listings.
+        // Scheduled Run must not silently Resync; only the explicitly enabled recovery
+        // controls may let the existing native baseline decide whether it can continue.
+        val baselineBeforeInterruption = reopened.read().getString("baselineId")
+        reopened.begin(BisyncStateStore.RUN, resyncFingerprint(context, task), null, UUID.randomUUID().toString())
+        val beforeRecovery = snapshot(right)
+        assertTrue(worker(task, BisyncStateStore.RUN, automatic = true).doWork() is ListenableWorker.Result.Failure)
+        assertEquals(beforeRecovery, snapshot(right))
+        task.bisyncAdvancedOptions = "--recover\n--resilient"
+        db.updateTask(task)
+        val recovered = worker(task, BisyncStateStore.RUN, automatic = true).doWork()
+        assertTrue("Configured scheduled recovery failed: $recovered; ${RunHistory.read(context, task)}",
+            recovered is ListenableWorker.Result.Success)
+        assertEquals(BisyncStateStore.READY, reopened.read().getString("status"))
+        assertEquals(baselineBeforeInterruption, reopened.read().getString("baselineId"))
 
         File(left, "both.txt").writeText("LLLL")
         File(right, "both.txt").writeText("RRRR")
@@ -158,8 +165,7 @@ class BisyncDeviceIntegrationTest {
         assertTrue(worker(task, BisyncStateStore.RUN, revision=oldRevision).doWork() is ListenableWorker.Result.Failure)
         assertEquals(rightBeforeEdit, snapshot(right))
         assertTrue(execute(task, BisyncStateStore.RUN) is ListenableWorker.Result.Failure)
-        assertSuccess(task, BisyncStateStore.PREVIEW)
-        assertSuccess(task, BisyncStateStore.INITIALISE, store.read().getString("previewFingerprint"))
+        assertSuccess(task, BisyncStateStore.INITIALISE)
 
         // Large deletion must stop before deleting the peer's committed contents.
         for (i in 1 until 9) File(left, "file-$i.txt").delete()
@@ -167,8 +173,7 @@ class BisyncDeviceIntegrationTest {
         assertTrue(execute(task, BisyncStateStore.RUN) is ListenableWorker.Result.Failure)
         assertEquals(peerBeforeThreshold, snapshot(right))
         assertEquals(BisyncStateStore.NEEDS_RECOVERY, store.read().getString("status"))
-        assertSuccess(task, BisyncStateStore.PREVIEW)
-        assertSuccess(task, BisyncStateStore.INITIALISE, store.read().getString("previewFingerprint"))
+        assertSuccess(task, BisyncStateStore.INITIALISE)
 
         val backup = File(context.cacheDir, "phase2-encrypted-backup.zip")
         rclone.exportConfigFile(Uri.fromFile(backup), "disposable-backup-password")

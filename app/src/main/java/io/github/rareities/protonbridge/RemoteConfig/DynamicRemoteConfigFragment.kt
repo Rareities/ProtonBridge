@@ -585,7 +585,11 @@ class DynamicRemoteConfigFragment() : Fragment() {
         if (submitting) return
 
         val options = java.util.ArrayList<String>()
-        val name: String = mRemoteName?.text.toString()
+        val name = mRemoteName?.text?.toString() ?: ""
+        if (!io.github.rareities.protonbridge.util.RemoteNamePolicy.isValid(name)) {
+            mRemoteName?.error = getString(R.string.invalid_remote_name)
+            return
+        }
         options.add(name)
         options.add(mProviderTitle)
 

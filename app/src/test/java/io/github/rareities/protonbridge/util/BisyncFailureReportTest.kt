@@ -10,7 +10,7 @@ class BisyncFailureReportTest {
                 "Bisync critical error: path1 and path2 are out of sync\nBisync aborted. Must run --resync to recover.")
         assertTrue(report.contains("could not verify matching contents"))
         assertTrue(report.contains("did not complete successfully"))
-        assertTrue(report.contains("Review and initialise"))
+        assertTrue(report.contains("confirm Resync"))
         assertTrue(report.contains("status 7"))
         assertTrue(report.contains(".nomedia"))
         assertFalse(report.contains('\u001b'))

@@ -90,7 +90,7 @@ class ScheduledRestartIntegrationTest {
             override fun setForegroundAsync(context: Context, id: UUID, info: ForegroundInfo): ListenableFuture<Void> =
                 SettableFuture.create<Void>().also { it.set(null) }
         }
-        fun initialise(operation: String, approval: String? = null) {
+        fun initialise(operation: String, approval: String) {
             val data = Data.Builder().putLong(SyncWorker.TASK_ID, task.id).putString("TASK_UUID", task.bisyncUUID)
                 .putString(SyncManager.TASK_REVISION, SyncManager.taskRevision(context, task))
                 .putString(SyncWorker.BISYNC_OPERATION, operation).putString(SyncWorker.BISYNC_APPROVAL, approval).build()
@@ -98,8 +98,7 @@ class ScheduledRestartIntegrationTest {
                 .setForegroundUpdater(foreground).setInputData(data).build()
             assertTrue("Initialisation failed: ${RunHistory.read(context, task)}", worker.doWork() is ListenableWorker.Result.Success)
         }
-        initialise(BisyncStateStore.PREVIEW)
-        initialise(BisyncStateStore.INITIALISE, state.read().getString("previewFingerprint"))
+        initialise(BisyncStateStore.INITIALISE, resyncFingerprint(context, task))
         File(left, "from-left.txt").writeText("local change during downtime")
         File(right, "from-right.txt").writeText("remote change during downtime")
         val trigger = Trigger(0).apply {

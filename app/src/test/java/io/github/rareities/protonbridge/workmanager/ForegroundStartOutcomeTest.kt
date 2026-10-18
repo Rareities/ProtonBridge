@@ -55,8 +55,6 @@ class ForegroundStartOutcomeTest {
         val root=BisyncPolicy.workdir(context,task)
         val state=BisyncStateStore(root)
         val baseline=UUID.randomUUID().toString()
-        state.begin("preview","unchanged",null,"preview")
-        state.finish("preview","unchanged","preview",true,0,"ok")
         state.begin("initialise","unchanged","unchanged",baseline)
         state.finish("initialise","unchanged",baseline,true,0,"ok")
         val original=File(root,"protonbridge.json").readText()

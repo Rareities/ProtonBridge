@@ -9,46 +9,38 @@ import java.io.FileNotFoundException
 class BisyncStateStore(private val directory: File) {
     companion object {
         const val RUN = "run"
-        const val PREVIEW = "preview"
         const val INITIALISE = "initialise"
         const val NEEDS_INITIALISATION = "NEEDS_INITIALISATION"
         const val NEEDS_RECOVERY = "NEEDS_RECOVERY"
-        const val PREVIEW_READY = "PREVIEW_READY"
         const val READY = "READY"
-        internal const val PREVIEW_LIFETIME_MS = 30 * 60_000L
         private val ioLock = Any()
 
         @JvmStatic fun isReady(state: JSONObject, fingerprint: String): Boolean =
             state.optString("status") == READY && state.optString("fingerprint") == fingerprint &&
                 BisyncPolicy.isValidIdentity(state.optString("baselineId"))
 
-        /** Validate readiness before resolving any baseline directory, including a first Run. */
-        @JvmStatic fun baselineForRun(state: JSONObject, fingerprint: String): String {
-            require(isReady(state, fingerprint)) {
-                val reason = when (state.optString("status")) {
-                    READY -> if (state.optString("fingerprint") != fingerprint)
-                        "The task settings, filters, configuration or bundled engine have changed since initialisation."
-                    else "The saved bisync baseline identity is missing or invalid. Review recovery."
-                    NEEDS_RECOVERY, "RUNNING", "INITIALISING" -> "The previous bisync did not complete or its saved state is invalid. Review recovery."
-                    PREVIEW_READY -> "Preview completed, but reviewed initialisation has not completed."
-                    "PREVIEWING" -> "The previous preview did not complete. Repeat Preview."
-                    else -> "Bisync has not completed initialisation."
+        /** Recovery never creates a baseline; the native engine validates its existing listings. */
+        @JvmStatic fun isRunnable(state: JSONObject, fingerprint: String, recoveryEnabled: Boolean = false): Boolean =
+            isReady(state, fingerprint) || (recoveryEnabled &&
+                state.optString("status") in setOf(NEEDS_RECOVERY, "RUNNING") &&
+                state.optString("fingerprint") == fingerprint &&
+                BisyncPolicy.isValidIdentity(state.optString("baselineId")))
+
+        @JvmStatic fun baselineForRun(state: JSONObject, fingerprint: String, recoveryEnabled: Boolean = false): String {
+            require(isRunnable(state, fingerprint, recoveryEnabled)) {
+                val reason = when {
+                    state.optString("fingerprint").isNotBlank() && state.optString("fingerprint") != fingerprint ->
+                        "The task settings, filters, configuration or bundled engine have changed since Resync."
+                    state.optString("status") == READY -> "The saved bisync baseline identity is missing or invalid."
+                    state.optString("status") in setOf(NEEDS_RECOVERY, "RUNNING", "INITIALISING") ->
+                        "The previous bisync did not complete. Recovery requires enabled --recover or --resilient and a matching saved baseline."
+                    else -> "Bisync has no completed baseline."
                 }
-                "$reason Run Preview, review the result and select Initialise before Run."
+                "$reason Review the settings and select Resync to create a new baseline."
             }
             return state.getString("baselineId")
         }
 
-        /** Use this before begin(PREVIEW) to select ordinary dry-run on saved listings. */
-        @JvmStatic fun isAdvisoryPreview(state: JSONObject, fingerprint: String): Boolean =
-            isReady(state, fingerprint) && state.optString("baselineId").isNotBlank()
-
-        @JvmStatic fun isPreviewApproved(state: JSONObject, fingerprint: String, now: Long = System.currentTimeMillis()): Boolean {
-            val age = now - state.optLong("previewAt")
-            return state.optString("status") == PREVIEW_READY &&
-                state.optString("previewFingerprint") == fingerprint &&
-                age in 0..PREVIEW_LIFETIME_MS
-        }
     }
 
     private val file = AtomicFile(File(directory, "protonbridge.json"))
@@ -68,6 +60,11 @@ class BisyncStateStore(private val directory: File) {
             }
             JSONObject(String(bytes, Charsets.UTF_8)).also {
                 require(it.getInt("version") == 1) { "Unknown state version" }
+                // The retired advisory operation copied listings and never mutated the live baseline.
+                if (it.optString("status") == "PREVIEWING" && it.optBoolean("previewWasReady") &&
+                    it.optString("fingerprint").matches(Regex("[0-9a-f]{64}")) &&
+                    BisyncPolicy.isValidIdentity(it.optString("baselineId"))) it.put("status", READY)
+                listOf("preview", "previewAt", "previewFingerprint", "previewWasReady").forEach { key -> it.remove(key) }
             }
         } catch (_: FileNotFoundException) {
             JSONObject().put("version", 1).put("status", NEEDS_INITIALISATION)
@@ -77,77 +74,49 @@ class BisyncStateStore(private val directory: File) {
         }
     }
 
-    fun begin(operation: String, fingerprint: String, approval: String?, runId: String) = synchronized(ioLock) {
+    /** Called under worker admission: only an exact unchanged legacy READY policy can migrate. */
+    fun migrateLegacyFingerprint(fingerprint: String, legacyFingerprint: String) = synchronized(ioLock) {
+        val state = read()
+        if (fingerprint != legacyFingerprint && isReady(state, legacyFingerprint)) {
+            state.put("fingerprint", fingerprint)
+            write(state)
+        }
+    }
+
+    fun begin(operation: String, fingerprint: String, approval: String?, runId: String,
+              recoveryEnabled: Boolean = false) = synchronized(ioLock) {
         val state = read()
         when (operation) {
-            RUN -> baselineForRun(state, fingerprint)
-            INITIALISE -> {
-                require(approval == fingerprint && isPreviewApproved(state, fingerprint)) {
-                    "Initialisation approval is missing, expired or no longer matches the task, configuration or engine. Run a new preview."
-                }
-            }
-            PREVIEW -> {
-                // Advisory dry-runs against a matching, healthy baseline must not
-                // turn a normal task into a new initialisation requirement.
-                state.put("previewWasReady", isAdvisoryPreview(state, fingerprint))
+            RUN -> baselineForRun(state, fingerprint, recoveryEnabled)
+            INITIALISE -> require(approval == fingerprint) {
+                "Resync confirmation no longer matches the task, filters, configuration or engine. Review the current settings and confirm Resync again."
             }
             else -> throw IllegalArgumentException("Unknown bisync operation")
         }
-        state.put("status", when (operation) {
-            PREVIEW -> "PREVIEWING"
-            INITIALISE -> "INITIALISING"
-            else -> "RUNNING"
-        })
-        state.put("runId", runId).put("operation", operation)
+        state.put("status", if (operation == INITIALISE) "INITIALISING" else "RUNNING")
+            .put("runId", runId).put("operation", operation)
             .put("startedAt", System.currentTimeMillis()).put("message", "")
-        state.remove("previewFingerprint")
         write(state)
     }
 
     fun finish(operation: String, fingerprint: String, runId: String, success: Boolean,
-               exitCode: Int?, message: String, preview: String = "") = synchronized(ioLock) {
+               exitCode: Int?, message: String) = synchronized(ioLock) {
         val state = read()
         if (state.optString("runId") != runId) return@synchronized
         state.put("finishedAt", System.currentTimeMillis())
             .put("exitCode", exitCode ?: JSONObject.NULL)
             .put("message", message.take(2048))
-        when {
-            operation == PREVIEW && success -> {
-                val advisory = state.optBoolean("previewWasReady", false) &&
-                    state.optString("fingerprint") == fingerprint
-                state.put("status", if (advisory) READY else PREVIEW_READY)
-                    .put("previewAt", System.currentTimeMillis())
-                    .put("preview", if (preview.length > 16000)
-                        "[Earlier preview entries omitted; this is a bounded diagnostic summary.]\n" + preview.takeLast(16000)
-                        else preview)
-                if (!advisory) state.put("previewFingerprint", fingerprint)
-            }
-            success -> {
-                state.put("status", READY).put("fingerprint", fingerprint)
-                    .put("lastSuccessfulRun", System.currentTimeMillis())
-                if (operation == INITIALISE) state.put("baselineId", runId)
-            }
-            operation == PREVIEW && state.optBoolean("previewWasReady", false) &&
-                state.optString("fingerprint") == fingerprint -> {
-                // A failed advisory dry-run does not modify the engine baseline.
-                // Preserve its identity and report the failure to the user.
-                state.put("status", READY)
-            }
-            else -> state.put("status", NEEDS_RECOVERY)
-        }
-        state.remove("previewWasReady")
+        if (success) {
+            state.put("status", READY).put("fingerprint", fingerprint)
+                .put("lastSuccessfulRun", System.currentTimeMillis())
+            if (operation == INITIALISE) state.put("baselineId", runId)
+        } else state.put("status", NEEDS_RECOVERY)
         write(state)
     }
 
     private fun write(value: JSONObject) {
         require(directory.isDirectory || directory.mkdirs()) { "Cannot create private bisync state" }
-        var bytes = value.toString().toByteArray(Charsets.UTF_8)
-        while (bytes.size > 65536 && value.optString("preview").length > 1000) {
-            val preview = value.optString("preview")
-            value.put("preview", "[Earlier preview entries omitted; this is a bounded diagnostic summary.]\n" +
-                preview.takeLast(preview.length / 2))
-            bytes = value.toString().toByteArray(Charsets.UTF_8)
-        }
+        val bytes = value.toString().toByteArray(Charsets.UTF_8)
         require(bytes.size <= 65536) { "Bisync state exceeds the private storage limit" }
         val stream = file.startWrite()
         try {

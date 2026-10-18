@@ -16,36 +16,156 @@ import java.util.UUID
 class BisyncStateTest {
     private fun store() = BisyncStateStore(File(ApplicationProvider.getApplicationContext<Application>().filesDir, UUID.randomUUID().toString()))
 
-    @Test fun initialisationRequiresACompletedMatchingPreview() {
-        val state = store()
-        assertThrows(IllegalArgumentException::class.java) { state.begin("run", "one", null, "run") }
-        assertThrows(IllegalArgumentException::class.java) { state.begin("initialise", "one", "one", "00000000-0000-0000-0000-000000000001") }
-        state.begin("preview", "one", null, "preview")
-        state.finish("preview", "one", "preview", true, 0, "preview complete")
-        assertThrows(IllegalArgumentException::class.java) { state.begin("initialise", "changed", "one", "00000000-0000-0000-0000-000000000001") }
-        state.begin("initialise", "one", "one", "00000000-0000-0000-0000-000000000001")
-        state.finish("initialise", "one", "00000000-0000-0000-0000-000000000001", true, 0, "success")
-        assertEquals(BisyncStateStore.READY, state.read().getString("status"))
+    private val baseline = "00000000-0000-0000-0000-000000000001"
+
+    private fun ready(store: BisyncStateStore, fingerprint: String = "one") {
+        store.begin(BisyncStateStore.INITIALISE, fingerprint, fingerprint, baseline)
+        store.finish(BisyncStateStore.INITIALISE, fingerprint, baseline, true, 0, "success")
     }
 
-    @Test fun interruptedAndFailedRunsCannotAutomaticallyReuseBaseline() {
-        val state = store()
-        state.begin("preview", "one", null, "preview")
-        state.finish("preview", "one", "preview", true, 0, "preview complete")
-        state.begin("initialise", "one", "one", "00000000-0000-0000-0000-000000000001")
-        state.finish("initialise", "one", "00000000-0000-0000-0000-000000000001", true, 0, "success")
-        state.begin("run", "one", null, "run")
-        assertThrows(IllegalArgumentException::class.java) { state.begin("run", "one", null, "after-crash") }
-        state.finish("run", "one", "run", false, 7, "cancelled")
-        assertEquals(BisyncStateStore.NEEDS_RECOVERY, state.read().getString("status"))
-        assertThrows(IllegalArgumentException::class.java) { state.begin("run", "one", null, "retry") }
+    @Test fun resyncRequiresMatchingExplicitConfirmationWithoutPrerequisite() {
+        val store = store()
+        assertThrows(IllegalArgumentException::class.java) { store.begin("run", "one", null, "run") }
+        assertThrows(IllegalArgumentException::class.java) { store.begin("initialise", "one", null, baseline) }
+        assertThrows(IllegalArgumentException::class.java) { store.begin("initialise", "changed", "one", baseline) }
+        ready(store)
+        assertTrue(BisyncStateStore.isReady(store.read(), "one"))
+        assertEquals(baseline, BisyncStateStore.baselineForRun(store.read(), "one"))
+    }
+
+    @Test fun interruptedRunRequiresExplicitRecoveryAndMatchingBaseline() {
+        val store = store()
+        ready(store)
+        store.begin("run", "one", null, "interrupted")
+        assertThrows(IllegalArgumentException::class.java) { store.begin("run", "one", null, "retry") }
+        assertFalse(BisyncStateStore.isReady(store.read(), "one"))
+        assertTrue(BisyncStateStore.isRunnable(store.read(), "one", true))
+        store.finish("run", "one", "interrupted", false, 7, "cancelled")
+        assertEquals(BisyncStateStore.NEEDS_RECOVERY, store.read().getString("status"))
+        assertThrows(IllegalArgumentException::class.java) { store.begin("run", "one", null, "retry") }
+        assertThrows(IllegalArgumentException::class.java) { store.begin("run", "changed", null, "retry", true) }
+        store.begin("run", "one", null, "recovery", true)
+        store.finish("run", "one", "recovery", true, 0, "recovered")
+        assertTrue(BisyncStateStore.isReady(store.read(), "one"))
+        assertEquals(baseline, store.read().getString("baselineId"))
+    }
+
+    @Test fun failedFirstResyncNeverCreatesRecoverableBaseline() {
+        val store = store()
+        store.begin("initialise", "one", "one", baseline)
+        store.finish("initialise", "one", baseline, false, 7, "failed")
+        assertFalse(BisyncStateStore.isRunnable(store.read(), "one", true))
+        assertThrows(IllegalArgumentException::class.java) { store.begin("run", "one", null, "retry", true) }
     }
 
     @Test fun staleCompletionCannotPromoteAnotherRunsState() {
-        val state = store()
-        state.begin("preview", "one", null, "current")
-        state.finish("preview", "one", "old-run", true, 0, "stale success")
-        assertEquals("PREVIEWING", state.read().getString("status"))
+        val store = store()
+        store.begin("initialise", "one", "one", baseline)
+        store.finish("initialise", "one", "stale", true, 0, "stale success")
+        assertEquals("INITIALISING", store.read().getString("status"))
+    }
+
+    @Test fun editedSettingsRequireNewConfirmationButDoNotDestroyHealthyBaseline() {
+        val store = store()
+        ready(store)
+        assertThrows(IllegalArgumentException::class.java) { store.begin("initialise", "edited", "one", baseline) }
+        assertThrows(IllegalArgumentException::class.java) { store.begin("run", "edited", null, "run", true) }
+        assertTrue(BisyncStateStore.isReady(store.read(), "one"))
+    }
+
+    @Test fun missingOrInvalidBaselineCannotEnableRecovery() {
+        for (id in listOf("", "broken", "1-1-1-1-1", "../escape")) {
+            val state = org.json.JSONObject().put("status", BisyncStateStore.NEEDS_RECOVERY)
+                .put("fingerprint", "one").put("baselineId", id)
+            assertFalse(BisyncStateStore.isRunnable(state, "one", true))
+            assertThrows(IllegalArgumentException::class.java) { BisyncStateStore.baselineForRun(state, "one", true) }
+        }
+    }
+
+    @Test fun existingHealthyBaselineRemainsReadyAndRetiredDiagnosticsAreDiscarded() {
+        val directory = File(ApplicationProvider.getApplicationContext<Application>().filesDir, UUID.randomUUID().toString()).apply { mkdirs() }
+        File(directory, "protonbridge.json").writeText(org.json.JSONObject().put("version", 1)
+            .put("status", BisyncStateStore.READY).put("fingerprint", "existing")
+            .put("baselineId", baseline).put("preview", "retired diagnostic")
+            .put("previewAt", 1234).toString())
+        val state = BisyncStateStore(directory).read()
+        assertTrue(BisyncStateStore.isReady(state, "existing"))
+        assertEquals(baseline, BisyncStateStore.baselineForRun(state, "existing"))
+        assertFalse(state.has("preview"))
+        assertFalse(state.has("previewAt"))
+    }
+
+    @Test fun interruptedRetiredAdvisoryRestoresOnlyAnIdentifiedHealthyBaseline() {
+        val directory = File(ApplicationProvider.getApplicationContext<Application>().filesDir, UUID.randomUUID().toString()).apply { mkdirs() }
+        val file = File(directory, "protonbridge.json")
+        val healthy = org.json.JSONObject().put("version", 1).put("status", "PREVIEWING")
+            .put("previewWasReady", true).put("fingerprint", "a".repeat(64)).put("baselineId", baseline)
+        file.writeText(healthy.toString())
+        assertTrue(BisyncStateStore.isReady(BisyncStateStore(directory).read(), "a".repeat(64)))
+        for (invalid in listOf(
+            org.json.JSONObject(healthy.toString()).put("previewWasReady", false),
+            org.json.JSONObject(healthy.toString()).put("fingerprint", ""),
+            org.json.JSONObject(healthy.toString()).put("baselineId", "../escape"),
+            org.json.JSONObject(healthy.toString()).put("status", "INITIALISING")
+        )) {
+            file.writeText(invalid.toString())
+            assertFalse(BisyncStateStore.isReady(BisyncStateStore(directory).read(), "a".repeat(64)))
+        }
+    }
+
+    @Test fun unchangedLegacyResilientBaselineMigratesWithoutAcceptingChangedSettings() {
+        val task = Task(4).apply {
+            direction = 6; bisyncUUID = java.util.UUID.randomUUID().toString()
+            localPath = "/local"; remoteId = "demo"; remotePath = "folder"
+            bisyncAdvancedOptions = "--resilient"
+        }
+        val legacy = BisyncPolicy.legacyFingerprint(task, emptyList(), "config")
+        val current = BisyncPolicy.fingerprint(task, emptyList(), "config")
+        assertNotEquals(legacy, current)
+        val store = store()
+        ready(store, legacy)
+        task.remotePath = "changed"
+        store.migrateLegacyFingerprint(BisyncPolicy.fingerprint(task, emptyList(), "config"),
+            BisyncPolicy.legacyFingerprint(task, emptyList(), "config"))
+        assertTrue(BisyncStateStore.isReady(store.read(), legacy))
+        task.remotePath = "folder"
+        store.migrateLegacyFingerprint(current, BisyncPolicy.legacyFingerprint(task, emptyList(), "different-config"))
+        assertTrue(BisyncStateStore.isReady(store.read(), legacy))
+        store.migrateLegacyFingerprint(current, legacy)
+        assertTrue(BisyncStateStore.isReady(store.read(), current))
+        assertEquals(baseline, store.read().getString("baselineId"))
+        assertFalse(BisyncStateStore.isReady(store.read(), legacy))
+    }
+
+    @Test fun legacyFingerprintMigrationNeverPromotesFailedState() {
+        val store = store()
+        ready(store, "legacy")
+        store.begin("run", "legacy", null, "interrupted")
+        store.migrateLegacyFingerprint("current", "legacy")
+        assertEquals("legacy", store.read().getString("fingerprint"))
+        assertEquals("RUNNING", store.read().getString("status"))
+    }
+
+    @Test fun recoveryFlagsDoNotInvalidateListingPolicyButOtherChangesDo() {
+        val task = Task(4).apply {
+            direction = 6; bisyncUUID = java.util.UUID.randomUUID().toString()
+            localPath = "/local"; remoteId = "demo"; remotePath = "folder"
+        }
+        val original = BisyncPolicy.fingerprint(task, emptyList(), "config")
+        for (flags in listOf("--recover", "--resilient=true", "--recover=false\n--resilient")) {
+            task.bisyncAdvancedOptions = flags
+            assertEquals(original, BisyncPolicy.fingerprint(task, emptyList(), "config"))
+        }
+        task.bisyncAdvancedOptions = "--recover\n--bwlimit=4M"
+        assertNotEquals(original, BisyncPolicy.fingerprint(task, emptyList(), "config"))
+    }
+
+    @Test fun firstRunOffersResyncRatherThanParsingAnEmptyIdentity() {
+        val failure = assertThrows(IllegalArgumentException::class.java) {
+            BisyncStateStore.baselineForRun(store().read(), "one", true)
+        }
+        assertTrue(failure.message!!.contains("Resync"))
+        assertFalse(failure.message!!.contains("Invalid UUID"))
     }
 
     @Test fun identityIncludesEngineConfigurationOptionsAndOrderedPaths() {
@@ -62,6 +182,7 @@ class BisyncStateTest {
         assertFalse(BisyncPolicy.overlaps("/a/b", "/a/b2"))
         assertTrue(BisyncPolicy.overlaps("/a/b", "/a/b/c"))
     }
+
 
     @Test fun changingTransferModeRotatesIdentityButLegacyBisyncModesShareOneBaseline() {
         val original = Task(17).apply {
@@ -83,73 +204,6 @@ class BisyncStateTest {
         assertNotEquals(bisync, BisyncPolicy.fingerprint(original, emptyList(), "same-config"))
     }
 
-    @Test fun expiredOrMismatchedPreviewNeverAuthorisesInitialisation() {
-        val store = store()
-        store.begin(BisyncStateStore.PREVIEW, "first", null, "preview")
-        store.finish(BisyncStateStore.PREVIEW, "first", "preview", true, 0, "ok")
-        val state = store.read()
-        val at = state.getLong("previewAt")
-        assertTrue(BisyncStateStore.isPreviewApproved(state, "first", at + BisyncStateStore.PREVIEW_LIFETIME_MS))
-        assertFalse(BisyncStateStore.isPreviewApproved(state, "first", at + BisyncStateStore.PREVIEW_LIFETIME_MS + 1))
-        assertFalse(BisyncStateStore.isPreviewApproved(state, "edited", at))
-        store.begin(BisyncStateStore.INITIALISE, "first", "first", "00000000-0000-0000-0000-000000000001")
-        store.finish(BisyncStateStore.INITIALISE, "first", "00000000-0000-0000-0000-000000000001", true, 0, "ok")
-        assertTrue(BisyncStateStore.isReady(store.read(), "first"))
-        assertFalse(BisyncStateStore.isReady(store.read(), "edited"))
-    }
-
-    @Test fun advisoryPreviewKeepsAnExistingBaselineAndDoesNotRequireResync() {
-        val store = store()
-        store.begin(BisyncStateStore.PREVIEW, "original", null, "preview-initial")
-        store.finish(BisyncStateStore.PREVIEW, "original", "preview-initial", true, 0, "ok")
-        store.begin(BisyncStateStore.INITIALISE, "original", "original", "00000000-0000-0000-0000-000000000002")
-        store.finish(BisyncStateStore.INITIALISE, "original", "00000000-0000-0000-0000-000000000002", true, 0, "ok")
-        val before = store.read()
-        assertTrue(BisyncStateStore.isAdvisoryPreview(before, "original"))
-        assertFalse(BisyncStateStore.isAdvisoryPreview(before, "edited"))
-        store.begin(BisyncStateStore.PREVIEW, "original", null, "advisory")
-        store.finish(BisyncStateStore.PREVIEW, "original", "advisory", true, 0, "no changes")
-        assertTrue(BisyncStateStore.isReady(store.read(), "original"))
-        assertEquals("00000000-0000-0000-0000-000000000002", store.read().optString("baselineId"))
-        assertFalse(BisyncStateStore.isPreviewApproved(store.read(), "original"))
-        store.begin(BisyncStateStore.PREVIEW, "original", null, "advisory-failed")
-        store.finish(BisyncStateStore.PREVIEW, "original", "advisory-failed", false, 3, "connection lost")
-        assertTrue(BisyncStateStore.isReady(store.read(), "original"))
-    }
-
-    @Test fun changedOptionsAfterReadyRequireANewExplicitApproval() {
-        val store = store()
-        store.begin(BisyncStateStore.PREVIEW, "old", null, "p1")
-        store.finish(BisyncStateStore.PREVIEW, "old", "p1", true, 0, "ok")
-        store.begin(BisyncStateStore.INITIALISE, "old", "old", "00000000-0000-0000-0000-000000000003")
-        store.finish(BisyncStateStore.INITIALISE, "old", "00000000-0000-0000-0000-000000000003", true, 0, "ok")
-        store.begin(BisyncStateStore.PREVIEW, "edited", null, "p2")
-        store.finish(BisyncStateStore.PREVIEW, "edited", "p2", true, 0, "ok")
-        assertFalse(BisyncStateStore.isReady(store.read(), "old"))
-        assertTrue(BisyncStateStore.isPreviewApproved(store.read(), "edited"))
-        assertThrows(IllegalArgumentException::class.java) { store.begin(BisyncStateStore.RUN, "old", null, "run") }
-    }
-
-    @Test fun firstRunReportsInitialisationInsteadOfParsingAnEmptyUuid() {
-        val error = assertThrows(IllegalArgumentException::class.java) {
-            BisyncStateStore.baselineForRun(store().read(), "current")
-        }
-        assertTrue(error.message!!.contains("Preview"))
-        assertTrue(error.message!!.contains("Initialise"))
-        assertFalse(error.message!!.contains("Invalid UUID"))
-    }
-
-    @Test fun malformedOrMissingBaselineCannotEnableRunOrAdvisoryPreview() {
-        for (baseline in listOf("", "broken", "1-1-1-1-1", "../escape")) {
-            val state = org.json.JSONObject().put("status", BisyncStateStore.READY)
-                .put("fingerprint", "current").put("baselineId", baseline)
-            assertFalse(BisyncStateStore.isReady(state, "current"))
-            assertFalse(BisyncStateStore.isAdvisoryPreview(state, "current"))
-            assertThrows(IllegalArgumentException::class.java) {
-                BisyncStateStore.baselineForRun(state, "current")
-            }
-        }
-    }
 
     @Test fun savingRepairsMalformedTaskIdentityAndInvalidWorkdirHasAnActionableError() {
         val context = ApplicationProvider.getApplicationContext<Application>()
@@ -161,66 +215,5 @@ class BisyncStateTest {
         assertTrue(BisyncPolicy.isValidIdentity(repaired))
         task.bisyncUUID = repaired
         assertEquals(repaired, BisyncPolicy.identityForEdit(task, 6))
-    }
-    @Test fun disposablePreviewRetiresOnlyAfterNativeExitAndKeepsBaselines() {
-        val root = File(ApplicationProvider.getApplicationContext<Application>().filesDir, UUID.randomUUID().toString())
-        val runId = UUID.randomUUID().toString()
-        val preview = File(root, "previews/$runId").apply { mkdirs() }
-        File(preview, "temporary.lst").writeText("private preview metadata")
-        val baseline = File(root, "baselines/$runId").apply { mkdirs() }
-        File(baseline, "saved.lst").writeText("healthy baseline")
-        assertFalse(BisyncPolicy.retirePreview(root, runId, false))
-        assertTrue(preview.isDirectory)
-        assertFalse(BisyncPolicy.retirePreview(root, "../baselines/$runId", true))
-        assertTrue(BisyncPolicy.retirePreview(root, runId, true))
-        assertFalse(preview.exists())
-        assertEquals("healthy baseline", File(baseline, "saved.lst").readText())
-    }
-
-    @Test fun previewRetirementCannotFollowLinkIntoBaseline() {
-        val root = File(ApplicationProvider.getApplicationContext<Application>().filesDir, UUID.randomUUID().toString())
-        val runId = UUID.randomUUID().toString()
-        val baseline = File(root, "baselines/$runId").apply { mkdirs() }
-        File(baseline, "saved.lst").writeText("healthy baseline")
-        val previews = File(root, "previews").apply { mkdirs() }
-        java.nio.file.Files.createSymbolicLink(File(previews, runId).toPath(), baseline.toPath())
-        assertFalse(BisyncPolicy.retirePreview(root, runId, true))
-        assertEquals("healthy baseline", File(baseline, "saved.lst").readText())
-    }
-    @Test fun previewRetirementCannotTraverseNestedLinkIntoBaseline() {
-        val root = File(ApplicationProvider.getApplicationContext<Application>().filesDir, UUID.randomUUID().toString())
-        val runId = UUID.randomUUID().toString()
-        val baseline = File(root, "baselines/$runId").apply { mkdirs() }
-        File(baseline, "saved.lst").writeText("healthy baseline")
-        val preview = File(root, "previews/$runId").apply { mkdirs() }
-        java.nio.file.Files.createSymbolicLink(File(preview, "nested").toPath(), baseline.toPath())
-        assertFalse(BisyncPolicy.retirePreview(root, runId, true))
-        assertEquals("healthy baseline", File(baseline, "saved.lst").readText())
-    }
-    @Test fun previewRetirementCannotFollowLinkIntoSiblingPreview() {
-        val root = File(ApplicationProvider.getApplicationContext<Application>().filesDir, UUID.randomUUID().toString())
-        val sibling = File(root, "previews/${UUID.randomUUID()}").apply { mkdirs() }
-        File(sibling, "active.lst").writeText("active preview")
-        val runId = UUID.randomUUID().toString()
-        java.nio.file.Files.createSymbolicLink(File(root, "previews/$runId").toPath(), sibling.toPath())
-        assertFalse(BisyncPolicy.retirePreview(root, runId, true))
-        assertEquals("active preview", File(sibling, "active.lst").readText())
-    }
-
-    @Test fun readinessMessagesDistinguishChangedSettingsFromRecovery() {
-        val baseline=UUID.randomUUID().toString()
-        val healthy=org.json.JSONObject().put("status",BisyncStateStore.READY)
-            .put("fingerprint","old").put("baselineId",baseline)
-        val changed=assertThrows(IllegalArgumentException::class.java) { BisyncStateStore.baselineForRun(healthy,"new") }
-        assertTrue(changed.message!!.contains("filters"))
-        assertFalse(changed.message!!.contains("previous bisync did not complete"))
-        healthy.put("fingerprint","new")
-        assertEquals(baseline,BisyncStateStore.baselineForRun(healthy,"new"))
-        healthy.put("status",BisyncStateStore.NEEDS_RECOVERY)
-        val interrupted=assertThrows(IllegalArgumentException::class.java) { BisyncStateStore.baselineForRun(healthy,"new") }
-        assertTrue(interrupted.message!!.contains("previous bisync did not complete"))
-        healthy.put("status",BisyncStateStore.READY).put("baselineId","invalid")
-        val invalid=assertThrows(IllegalArgumentException::class.java) { BisyncStateStore.baselineForRun(healthy,"new") }
-        assertTrue(invalid.message!!.contains("baseline identity"))
     }
 }

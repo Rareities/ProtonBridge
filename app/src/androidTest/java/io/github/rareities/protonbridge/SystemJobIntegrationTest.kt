@@ -40,7 +40,7 @@ import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
 
 /** Runs real Android JobScheduler/WorkManager constraints and cancellation with packaged rclone.
- * Only the initial preview/initialisation uses TestWorkerBuilder and a fake foreground updater.
+ * Only the initial explicit Resync uses TestWorkerBuilder and a fake foreground updater.
  * The two queued RUN operations use the production WorkManager and SyncWorker unchanged.
  * One sequential test prevents these operations racing each other on native/global state.
  */
@@ -115,7 +115,7 @@ class SystemJobIntegrationTest {
 
     private fun initialise(task: Task) {
         val store = BisyncStateStore(BisyncPolicy.workdir(context, task))
-        fun direct(operation: String, approval: String? = null) {
+        fun direct(operation: String, approval: String) {
             awaitCondition("preparation native ownership to settle before $operation", 8_000) {
                 !NativeSessionGate.GLOBAL.isBusy && !ProtectedRcloneConfig.hasRunningProcess()
             }
@@ -130,9 +130,7 @@ class SystemJobIntegrationTest {
             assertTrue("$operation failed with $result (nativeBusy=${NativeSessionGate.GLOBAL.isBusy}): ${RunHistory.read(context, task)}",
                 result is ListenableWorker.Result.Success)
         }
-        direct(BisyncStateStore.PREVIEW)
-        assertEquals(BisyncStateStore.PREVIEW_READY, store.read().getString("status"))
-        direct(BisyncStateStore.INITIALISE, store.read().getString("previewFingerprint"))
+        direct(BisyncStateStore.INITIALISE, resyncFingerprint(context, task))
         assertEquals("Preparation did not create a usable baseline", BisyncStateStore.READY,
             store.read().getString("status"))
     }

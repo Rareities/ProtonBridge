@@ -25,6 +25,16 @@ public class AdvancedOptionsTest {
         assertThrows(IllegalArgumentException.class, () -> AdvancedOptions.parse("--bwlimit 1M\n--bwlimit=2M"));
     }
 
+    @Test public void recoveryFlagsAreNativeBooleansAndDoNotImplyResync() {
+        assertEquals(Arrays.asList("--recover", "--resilient=true"),
+                AdvancedOptions.parse("--recover\n--resilient true"));
+        assertTrue(AdvancedOptions.recoveryEnabled("--recover"));
+        assertTrue(AdvancedOptions.recoveryEnabled("--resilient=true"));
+        assertFalse(AdvancedOptions.recoveryEnabled("--recover=false\n--resilient=false"));
+        for (String input : Arrays.asList("--recover=yes", "--resilient=1", "--recovery", "--reselient"))
+            assertThrows(input, IllegalArgumentException.class, () -> AdvancedOptions.parse(input));
+    }
+
     @Test public void repeatableFiltersKeepTheirOrder() {
         assertEquals(Arrays.asList("--filter=+ A/**", "--filter=- B/**"), AdvancedOptions.parse("--filter=+ A/**\n--filter=- B/**"));
     }

@@ -4,6 +4,42 @@ This records the Rareities changes on top of the direct upstream repositories.
 Commit authors are git metadata, not a claim about who directed each line.
 Integration merges are included without counting their features twice.
 
+## 1.2.1 — direct Resync, native recovery and upstream updates
+
+- Remove bisync dry-run/preview UI, reports, approval expiry, copied preview listings
+  and the mandatory preview step. Resync saves the task, confirms folders, filters,
+  flags and preferred copy, then performs real transfers. Scheduled runs never
+  automatically choose Resync. Normal Run keeps using the completed baseline.
+- Permit native `--recover` and `--resilient` boolean flags. A failed/interrupted
+  ordinary run may retry its matching saved baseline when either is enabled;
+  rclone validates whether recovery is possible. Adding these operational flags
+  does not change file-selection identity. Missing baselines, changed endpoints,
+  filters, configuration or engine still require Resync. Neither flag guarantees
+  recovery of a failed first Resync. Correct spellings are shown for typos.
+- Merge 52 official rclone commits through `35a03a47e00e2cadec744f977e5fa9d851127016`,
+  pinned by fork merge [`814954580`](https://github.com/Rareities/rclone/commit/8149545802697161ce320aaabaca6b84f0396d50).
+  Includes bisync skipped-conflict/listing fixes, include-filter performance work,
+  VFS memory/race fixes and Drive fast-list hang fixes. Retain Proton metadata,
+  checksum requirements, contained companion modules and atomic listing locks.
+  This is upstream development source, not a new official stable rclone release.
+- Reduce repeated work: publish RC notification summaries only when displayed
+  counts change; stop repeatedly logging retained failed jobs at every poll.
+  Optional session checks skip empty tokens and TOTP-only configurations.
+  Lock ownership, streaming lifecycle, idle shutdown and transfer refresh remain.
+  No measured device battery saving is claimed.
+- Reconcile upstream CloudBridge security/reliability commit `f97ff8e3` with the fork:
+  private validated share/download staging, loopback streaming URL capability,
+  exact remote-name validation, checked missing-remote failures and fail-closed
+  Keystore protection of SAF credentials. Preserve stronger existing redacted
+  logging, native stream ownership and signed-build provenance protections.
+- Validation: **222 app host tests, zero failures/skips**, 14 release-script tests,
+  lint, all four native ABI builds, debug split/universal APKs and device-test APK
+  build. Engine host/race regressions, four upstream bisync scenarios and native
+  trusted-listing recovery checks passed; independent integration reviews completed.
+  Device tests were compiled, not executed on a physical phone.
+- Base version code 210; ARM64 217. The new engine pin requires a one-time Resync
+  before an older engine baseline can be used. Existing releases stay immutable.
+
 ## 1.2.0 — audited stable release
 
 - Publish the audited ProtonBridge source as **1.2.0**, a full stable release with
@@ -869,11 +905,11 @@ Authors below are git metadata. Merge rows represent integration, not an extra i
 
 ### Bisync and flags
 
-Use **Save and preview → Review and initialise → Run** with independent backups.
-The preview is advisory, not a frozen cloud snapshot. Review initial winning side,
+Use **Resync → confirm settings → Run** with independent backups.
+Resync performs real transfers after confirmation. Review initial winning side,
 ordered endpoints, filters, optional backups and the deletion percentage (default
-10 percent). Backup folders must be outside synced roots. Approval expires after
-30 minutes and is bound to settings, configuration identity and the engine pin.
+10 percent). Backup folders must be outside synced roots. Confirmation is bound
+to settings, configuration identity and the engine pin when the job starts.
 Missing/interrupted state requires explicit recovery; there is no automatic force
 or resync repair.
 
@@ -928,7 +964,7 @@ Configuration migration/import/restore uses staged validation and rollback
 journals. Protected backup exports contain secrets and need careful handling;
 keep their passphrase safe. Android automatic backup is disabled. Exported task
 requests require a valid shortcut capability or confirmation. RC/WebDAV services
-are local and authenticated. Logs and preview reports can contain filenames:
+are local and authenticated. Logs can contain filenames:
 redact them before sharing. Markdown rendering blocks scripts and subresources;
 explicit web links open externally. Provider and optional GitHub requests expose
 ordinary network metadata to those services; there is no app analytics or ad SDK.

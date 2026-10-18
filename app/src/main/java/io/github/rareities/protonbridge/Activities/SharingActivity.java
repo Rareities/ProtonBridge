@@ -231,31 +231,37 @@ public class SharingActivity extends AppCompatActivity implements ShareRemotesFr
                     continue;
                 }
 
+                File outFile = null;
+                boolean copied = false;
                 try {
+                    if ("file".equalsIgnoreCase(uri.getScheme())) {
+                        File source = new File(uri.getPath());
+                        io.github.rareities.protonbridge.util.PrivateFileStaging.requireOutside(source,
+                                new File(getApplicationInfo().dataDir));
+                        if (android.os.Build.VERSION.SDK_INT >= 24) {
+                            io.github.rareities.protonbridge.util.PrivateFileStaging.requireOutside(source,
+                                    createDeviceProtectedStorageContext().getDataDir());
+                        }
+                    }
                     fileName = resolveName(uri);
-                } catch (SecurityException e) {
-                    success = false;
-                    continue;
-                }
-                // todo: encrypt external cache
-                File cacheDir = getExternalCacheDir();
-                File outFile = new File(cacheDir, fileName);
-                try (InputStream in = getContentResolver().openInputStream(uri);
-                     OutputStream out = new BufferedOutputStream(new FileOutputStream(outFile), 64 * 1024)) {
-                    if (null == in) {
-                        success = false;
-                        continue;
+                    File cacheDir = io.github.rareities.protonbridge.util.PrivateFileStaging.directory(getCacheDir(), "share_staging");
+                    outFile = io.github.rareities.protonbridge.util.PrivateFileStaging.target(cacheDir, fileName);
+                    InputStream raw = getContentResolver().openInputStream(uri);
+                    if (raw == null) throw new IOException("Shared content is unavailable");
+                    try (InputStream in = raw;
+                         OutputStream out = new BufferedOutputStream(new FileOutputStream(outFile), 64 * 1024)) {
+                        byte[] buf = new byte[64 * 1024];
+                        int len;
+                        while ((len = in.read(buf)) != -1) out.write(buf, 0, len);
+                        out.flush();
                     }
                     uploadList.add(outFile.getAbsolutePath());
-                    byte[] buf = new byte[64 * 1024];
-                    int len;
-                    while ((len = in.read(buf)) > 0) {
-                        out.write(buf, 0, len);
-                    }
-                    out.flush();
-                } catch (IOException e) {
-                    FLog.e(TAG, "Copy error: ", e);
+                    copied = true;
+                } catch (IOException | SecurityException e) {
+                    FLog.w(TAG, "Shared content could not be staged safely");
                     success = false;
+                } finally {
+                    if (!copied && outFile != null) outFile.delete();
                 }
             }
             return success;

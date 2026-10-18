@@ -54,14 +54,14 @@ class RetentionRecoveryTest {
         assertTrue(File(context.filesDir, "run-history/task-${task.bisyncUUID}.json").length() <= 256 * 1024)
     }
 
-    @Test fun oversizedPreviewRemainsReadableAndDisclosesOmissions() {
+    @Test fun boundedStateMessagesRemainReadableWithEscapedUnicode() {
         val dir = File(context.filesDir, "test-state").apply { mkdirs() }
         val state = BisyncStateStore(dir)
-        state.begin("preview", "fingerprint", null, "run")
-        state.finish("preview", "fingerprint", "run", true, 0, "Ready", "\u0001".repeat(40000))
-        val saved = state.read()
-        assertEquals(BisyncStateStore.PREVIEW_READY, saved.getString("status"))
-        assertTrue(saved.getString("preview").contains("omitted"))
+        val id = UUID.randomUUID().toString()
+        state.begin("initialise", "fingerprint", "fingerprint", id)
+        state.finish("initialise", "fingerprint", id, true, 0, "\u0001".repeat(40000))
+        assertEquals(BisyncStateStore.READY, state.read().getString("status"))
+        assertEquals(2048, state.read().getString("message").length)
         assertTrue(File(dir, "protonbridge.json").length() <= 65536)
     }
 

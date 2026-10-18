@@ -17,10 +17,8 @@
     <EditText android:id="@+id/bisync_max_delete" android:layout_width="match_parent" android:layout_height="wrap_content"
         android:inputType="number" android:singleLine="true" android:minHeight="48dp" android:autofillHints="" android:text="10" />
     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_delete_help" />
-    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_preview_help" />
-    <Button android:id="@+id/bisync_preview_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_preview" />
-    <Button android:id="@+id/bisync_preview_report_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_view_preview" android:enabled="false" />
-    <Button android:id="@+id/bisync_initialize_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_review" android:enabled="false" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_resync_help" />
+    <Button android:id="@+id/bisync_initialize_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_review" />
     <Button android:id="@+id/bisync_advanced_toggle" android:layout_width="match_parent" android:layout_height="wrap_content"
         android:text="@string/bisync_advanced_show" />
     <LinearLayout android:id="@+id/bisync_advanced_panel" android:layout_width="match_parent" android:layout_height="wrap_content"

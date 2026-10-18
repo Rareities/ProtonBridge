@@ -45,9 +45,8 @@ class SyncManager(private val mContext: Context) {
     fun queue(trigger: Trigger) { if (trigger.isEnabled) queueTask(trigger.triggerTarget, automatic = true) }
     fun queue(task: Task) { queue(task.id) }
     fun queue(taskID: Long) { queueTask(taskID) }
-    fun previewBisync(taskID: Long) { queueTask(taskID, operation = BisyncStateStore.PREVIEW) }
     fun initialiseBisync(taskID: Long, approval: String) {
-        require(approval.matches(Regex("[0-9a-f]{64}"))) { "A successful matching preview is required" }
+        require(approval.matches(Regex("[0-9a-f]{64}"))) { "Confirm the current Resync settings first" }
         queueTask(taskID, operation = BisyncStateStore.INITIALISE, approval = approval)
     }
 

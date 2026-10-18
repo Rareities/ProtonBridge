@@ -126,8 +126,21 @@ public class RemoteConfigHelper {
     }
 
     public static void enableSaf(Context context) {
-        String user = SafAccessProvider.getUser(context);
-        String pass = SafAccessProvider.getPassword(context);
+        final String user;
+        final String pass;
+        try {
+            user = SafAccessProvider.getUser(context);
+            pass = SafAccessProvider.getPassword(context);
+        } catch (RuntimeException unavailable) {
+            Context app = context.getApplicationContext();
+            new Handler(Looper.getMainLooper()).post(() -> {
+                // The caller may persist its enable toggle after this method returns.
+                PreferenceManager.getDefaultSharedPreferences(app).edit()
+                        .putBoolean(app.getString(R.string.pref_key_enable_saf), false).apply();
+                Toasty.error(app, app.getString(R.string.error_creating_remote), Toast.LENGTH_SHORT, true).show();
+            });
+            return;
+        }
         ArrayList<String> options = new ArrayList<>();
         options.add(SafConstants.SAF_REMOTE_NAME);
         options.add("webdav");

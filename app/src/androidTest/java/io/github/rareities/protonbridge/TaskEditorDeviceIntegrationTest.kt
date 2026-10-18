@@ -43,7 +43,7 @@ import java.io.File
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
-/** Drives the real editor, approval dialog, WorkManager and packaged native engine together.
+/** Drives the real editor, explicit Resync confirmation, WorkManager and packaged native engine together.
  * No remote-discovery override, WorkerFactory, foreground updater or scheduler is substituted.
  */
 @RunWith(AndroidJUnit4::class)
@@ -139,7 +139,7 @@ class TaskEditorDeviceIntegrationTest {
     }
 
     @Test(timeout = 240_000)
-    fun createPreviewRotateApproveSyncEditAndScheduleThroughGui() {
+    fun createResyncRotateSyncEditAndScheduleThroughGui() {
         assumeTrue("Disposable API 35 debug emulator required",
             Build.VERSION.SDK_INT == 35 && context.packageName.endsWith(".debug") &&
                 (Build.HARDWARE.contains("ranchu") || Build.HARDWARE.contains("goldfish")))
@@ -178,14 +178,22 @@ class TaskEditorDeviceIntegrationTest {
                 activity.findViewById<EditText>(R.id.bisync_advanced_flags).setText("--bwlimit=8M")
             }
 
-            // Preview itself saves a new task. Recreation must keep that persisted identity.
-            press(screen, R.id.bisync_preview_button)
+            // Resync saves the task, but cancellation of confirmation must transfer nothing.
+            press(screen, R.id.bisync_initialize_button)
             await("GUI-created SQLite task") { db.allTasks.any { it.title == title } }
             val task = db.allTasks.single { it.title == title }
             saved = task
-            awaitNewSuccess(task, emptySet())
+            await("explicit Resync confirmation") {
+                try {
+                    onView(withText(R.string.bisync_approve)).inRoot(isDialog()).check(matches(isDisplayed()))
+                    true
+                } catch (_: androidx.test.espresso.NoMatchingViewException) { false }
+                catch (_: androidx.test.espresso.NoMatchingRootException) { false }
+            }
+            onView(withText(android.R.string.cancel)).inRoot(isDialog()).perform(click())
+            assertTrue("Cancel must not enqueue native work", jobs(task).isEmpty())
             val state = BisyncStateStore(BisyncPolicy.workdir(context, task))
-            assertEquals(BisyncStateStore.PREVIEW_READY, state.read().getString("status"))
+            assertEquals(BisyncStateStore.NEEDS_INITIALISATION, state.read().getString("status"))
             assertFalse(File(right, "local.txt").exists())
             assertFalse(File(left, "remote.txt").exists())
             screen.recreate()
@@ -196,7 +204,7 @@ class TaskEditorDeviceIntegrationTest {
             awaitEnabled(screen, R.id.bisync_initialize_button)
             val beforeInitialise = jobs(task).map { it.id }.toSet()
             press(screen, R.id.bisync_initialize_button)
-            await("explicit approval dialog") {
+            await("explicit Resync confirmation") {
                 try {
                     onView(withText(R.string.bisync_approve)).inRoot(isDialog()).check(matches(isDisplayed()))
                     true
@@ -215,43 +223,12 @@ class TaskEditorDeviceIntegrationTest {
 
             File(left, "left-change.txt").writeText("L")
             File(right, "right-change.txt").writeText("R")
-            val baselineBeforePreview = state.read().getString("baselineId")
-            val beforeAdvisory = jobs(task).map { it.id }.toSet()
-            press(screen, R.id.bisync_preview_button)
-            awaitNewSuccess(task, beforeAdvisory)
-            assertEquals(BisyncStateStore.READY, state.read().getString("status"))
-            assertEquals(baselineBeforePreview, state.read().getString("baselineId"))
-            assertFalse("Advisory preview must not transfer files", File(right, "left-change.txt").exists())
-            assertFalse("Advisory preview must not transfer files", File(left, "right-change.txt").exists())
-            assertTrue("The preview must identify affected filenames", state.read().getString("preview").contains("left-change.txt"))
-            awaitEnabled(screen, R.id.bisync_preview_report_button)
-            press(screen, R.id.bisync_preview_report_button)
-            try {
-                await("saved preview report dialog") {
-                    try {
-                        onView(withText(containsString("left-change.txt"))).inRoot(isDialog()).check(matches(isDisplayed()))
-                        true
-                    } catch (_: androidx.test.espresso.NoMatchingViewException) { false }
-                    catch (_: androidx.test.espresso.NoMatchingRootException) { false }
-                }
-            } catch (failure: Throwable) {
-                instrumentation.uiAutomation.takeScreenshot()?.let { image ->
-                    File(context.cacheDir, "preview-dialog-failure.png").outputStream().use {
-                        image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
-                    }
-                    image.recycle()
-                }
-                screen.onActivity { activity ->
-                    val action = activity.findViewById<Button>(R.id.bisync_preview_report_button)
-                    android.util.Log.e("GuiAcceptance", "Preview dialog absent: finishing=${activity.isFinishing}, enabled=${action.isEnabled}, attached=${action.isAttachedToWindow}, focus=${action.hasWindowFocus()}")
-                }
-                throw failure
-            }
-            onView(withText(android.R.string.ok)).inRoot(isDialog()).perform(click())
             awaitEnabled(screen, R.id.task_run_button)
             val beforeRun = jobs(task).map { it.id }.toSet()
+            val baselineBeforeRun = state.read().getString("baselineId")
             press(screen, R.id.task_run_button)
             awaitNewSuccess(task, beforeRun)
+            assertEquals(baselineBeforeRun, state.read().getString("baselineId"))
             assertEquals("L", File(right, "left-change.txt").readText())
             assertEquals("R", File(left, "right-change.txt").readText())
 

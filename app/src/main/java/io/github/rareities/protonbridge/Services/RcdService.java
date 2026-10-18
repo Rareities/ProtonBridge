@@ -64,6 +64,7 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
     private final Handler idleHandler = new Handler(Looper.getMainLooper());
     private final Runnable idleAction = this::shutdownIfPossible;
     private final RcDemandState demand = new RcDemandState();
+    private final RcNotificationState notificationState = new RcNotificationState();
     private final java.util.Set<Runnable> streamCancellations = new java.util.HashSet<>();
     private boolean stopping;
 
@@ -86,13 +87,6 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
     public synchronized void onRcdJobsUpdate(@NonNull SparseArray<RcloneRcd.JobStatusResponse> status) {
         if (shutdown) return;
         onNotifyUse();
-        int flags = 0;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            flags = PendingIntent.FLAG_IMMUTABLE;
-        }
-        Intent foregroundIntent = new Intent(this, io.github.rareities.protonbridge.Activities.MainActivity.class);
-        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, foregroundIntent, flags);
-
         // build job statistics
         long running = 0;
         long finished = 0;
@@ -104,7 +98,8 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
                 if (response.success) {
                     finished++;
                 } else {
-                    FLog.w(TAG, "Job (id=%d): %s", response.id, response.error);
+                    // Terminal handlers already report failures. Retained history is present in
+                    // every poll, so do not re-log it or retain raw backend diagnostics here.
                     failed++;
                 }
             } else {
@@ -112,8 +107,31 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
             }
         }
 
-        String statusLine = getString(R.string.rcd_service_notification_stats_template, running, finished, failed);
+        // Wakelock ownership follows real activity even when the notification is unchanged.
+        if (running > 0) {
+            if (activeTransferLocks == null) activeTransferLocks = TransferLocks.acquire(this, "rcd");
+        } else if (demand.streamCount() == 0 && activeTransferLocks != null) {
+            activeTransferLocks.release();
+            activeTransferLocks = null;
+        }
+        // The notification displays counts and indeterminate progress only. Reposting the
+        // same summary every status poll adds binder/UI work without showing new information.
+        if (!notificationManager.areNotificationsEnabled()) {
+            // A denied publish is not a cached summary. If permission is later granted,
+            // the first poll must still show the active operation even if counts are unchanged.
+            notificationState.reset();
+            return;
+        }
+        if (!notificationState.update(running, finished, failed)) return;
 
+        int flags = 0;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            flags = PendingIntent.FLAG_IMMUTABLE;
+        }
+        Intent foregroundIntent = new Intent(this, io.github.rareities.protonbridge.Activities.MainActivity.class);
+        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, foregroundIntent, flags);
+
+        String statusLine = getString(R.string.rcd_service_notification_stats_template, running, finished, failed);
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_rclone_logo)
                 .setContentTitle(getString(R.string.rcd_service_notification_running_in_background))
@@ -121,16 +139,7 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setContentIntent(pendingIntent)
                 .addAction(R.drawable.ic_cancel_download, getString(R.string.rcd_service_notification_btn_stop_all), stopServiceIntent());
-
-        if (running > 0) {
-            builder.setOngoing(true).setProgress(100, 25, true);
-            if (activeTransferLocks == null) {
-                activeTransferLocks = TransferLocks.acquire(this, "rcd");
-            }
-        } else if (demand.streamCount() == 0 && activeTransferLocks != null) {
-            activeTransferLocks.release();
-            activeTransferLocks = null;
-        }
+        if (running > 0) builder.setOngoing(true).setProgress(100, 25, true);
 
         NotificationUtils.createNotification(this, PERSISTENT_NOTIFICATION_ID, builder.build());
     }
@@ -251,6 +260,8 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
     }
 
     private void showNotification() {
+        // The placeholder replaces any previous summary; publish the next real state again.
+        notificationState.reset();
         Intent foregroundIntent = new Intent(this, io.github.rareities.protonbridge.Activities.MainActivity.class);
         PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, foregroundIntent, FlagsUtil.Companion.getFlagImmutable());
 

@@ -1,3 +1,18 @@
+# ProtonBridge 1.2.1
+
+Bisync uses direct Resync confirmation; mandatory dry runs and saved previews
+are removed. Native --recover and --resilient flags are supported for a matching
+existing baseline. They do not require Resync merely because they were added.
+
+Updated the pinned rclone fork with upstream bisync, filter, VFS and backend fixes.
+The changed engine requires one new Resync. Reduced duplicate RC notifications
+and unnecessary optional session probes. Integrated missing upstream security fixes.
+Device battery savings have not been measured.
+
+[Full changelog](https://github.com/Rareities/ProtonBridge/blob/master/docs/FORK_CHANGELOG.md)
+
+---
+
 # ProtonBridge 1.2.0
 
 Full stable release of the audited ProtonBridge source, with the existing

@@ -31,7 +31,9 @@ class SessionGuardianWorker(private val mContext: Context, params: WorkerParamet
                 if (isStopped || !SessionGuardianScheduler.isEnabled(mContext) ||
                     SystemClock.elapsedRealtime() >= deadline || NativeSessionGate.GLOBAL.isBusy()) break
                 val settings = entries.optJSONObject(name) ?: continue
-                if (!(settings.has("token") || settings.has("access_token") || settings.has("totp_secret"))) continue
+                // A key with no credential (or a TOTP seed alone) is not a cached session.
+                // Probing it can bootstrap an unnecessary password login every maintenance run.
+                if (!SessionProbePolicy.hasCachedSession(settings.opt("token"), settings.opt("access_token"))) continue
                 val result = runInterruptible(Dispatchers.IO) {
                     rclone.listDirectories(name, 1) {
                         isStopped || !SessionGuardianScheduler.isEnabled(mContext) || SystemClock.elapsedRealtime() >= deadline

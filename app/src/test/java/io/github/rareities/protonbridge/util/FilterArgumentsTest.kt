@@ -43,7 +43,7 @@ class FilterArgumentsTest {
         val rclone = object : Rclone(context) {
             override fun getRemoteItemFromName(name: String): RemoteItem = RemoteItem(name, "webdav")
         }
-        for (operation in listOf("preview", "initialise", "run")) {
+        for (operation in listOf("initialise", "run")) {
             val args = rclone.bisyncArguments(BisyncPolicy.effectiveTask(loaded, 1), File(context.filesDir, "fixture-baseline"), operation, filters, false).toList()
             assertTrue("$operation lost a non-filter flag", args.contains("--tpslimit=6"))
             assertTrue("$operation lost the exclusion", args.contains("--filter=- /.nomedia"))
@@ -52,7 +52,7 @@ class FilterArgumentsTest {
             assertTrue(args.contains("--filter=- /**"))
             assertFalse(args.any { it.startsWith("--include=") || it.startsWith("--exclude=") })
             assertEquals(operation != "run", args.contains("--resync-mode=path2"))
-            assertEquals(operation == "preview", args.contains("--dry-run"))
+            assertFalse(args.contains("--dry-run"))
         }
     }
 
