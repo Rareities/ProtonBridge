@@ -71,3 +71,5 @@ Mixed integration commits below describe only their fork-specific contribution.
 | [4674c39621](https://github.com/Rareities/ProtonBridge/commit/4674c39621dce5e21e6c71771dc9d582fbc53800) | fix: report Android start restrictions without redundant retries |
 | [8c047e03d8](https://github.com/Rareities/ProtonBridge/commit/8c047e03d82460f6073243b5c218ced1087a6905) | release: publish audited ProtonBridge 1.2.0 stable |
 | [7fab8aaaa1](https://github.com/Rareities/ProtonBridge/commit/7fab8aaaa1783fea2a721ac3490eaf9a124d4e24) | Remove mandatory bisync preview; direct Resync; native recovery flags and baseline migration; suppress redundant notifications and optional empty-session probes. |
+
+| [63b1d17310](https://github.com/Rareities/ProtonBridge/commit/63b1d17310c08010ce607e33fef93d0bbee61b5a) | Verify fork metadata persistence; remove dead scheduler/import helpers; preserve encrypted-backup proxy rollback policy; split complete fork histories and promote the exact engine pin. |
