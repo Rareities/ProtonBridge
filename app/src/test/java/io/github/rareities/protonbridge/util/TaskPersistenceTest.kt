@@ -73,7 +73,7 @@ class TaskPersistenceTest {
         val trigger = Trigger(8).apply { title = "Daily"; triggerTarget = 7; time = 600; isEnabled = true; setWeekdays(127) }
         val root = JSONObject().put("tasks", JSONArray().put(task.asJSON()))
             .put("filters", JSONArray()).put("trigger", JSONArray().put(trigger.asJSON()))
-        val imported = ImportPlan.parse(root.toString())
+        val imported = ImportPlan.parse(root.toString(), context)
         assertNotEquals("existing-identity", imported.tasks.first().bisyncUUID)
         assertFalse(imported.triggers.first().isEnabled)
     }

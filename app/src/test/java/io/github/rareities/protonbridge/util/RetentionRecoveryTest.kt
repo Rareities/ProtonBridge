@@ -18,6 +18,8 @@ import java.util.UUID
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], application = Application::class)
 class RetentionRecoveryTest {
+    @get:org.junit.Rule val directoryBarrier = io.github.rareities.protonbridge.util.DirectoryBarrierRule()
+
     private val context: Application get() = ApplicationProvider.getApplicationContext()
 
     @Test fun stagingRecoveryKeepsActiveNativeFilesAndUnrelatedData() {

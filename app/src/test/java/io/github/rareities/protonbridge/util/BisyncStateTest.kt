@@ -14,6 +14,8 @@ import java.util.UUID
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], application = Application::class)
 class BisyncStateTest {
+    @get:org.junit.Rule val directoryBarrier = io.github.rareities.protonbridge.util.DirectoryBarrierRule()
+
     private fun store() = BisyncStateStore(File(ApplicationProvider.getApplicationContext<Application>().filesDir, UUID.randomUUID().toString()))
 
     private val baseline = "00000000-0000-0000-0000-000000000001"

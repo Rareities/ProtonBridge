@@ -386,15 +386,24 @@ public class SafDAVServer extends NanoHTTPD {
      * @param session
      * @return
      */
+    static String mappedDestination(String destination) {
+        if (destination == null) return null;
+        Uri address = Uri.parse(destination);
+        Uri origin = Uri.parse(SafConstants.SAF_REMOTE_URL);
+        if (!origin.getScheme().equalsIgnoreCase(address.getScheme()) || !origin.getHost().equalsIgnoreCase(address.getHost())
+                || origin.getPort() != address.getPort() || address.getUserInfo() != null
+                || address.getQuery() != null || address.getFragment() != null) return null;
+        String path = address.getPath();
+        return ProviderPaths.isSafeMappedPath(path) ? path : null;
+    }
+
     protected Response onMove(IHTTPSession session) {
         String path = session.getUri();
-        Uri src = paths.getUriByMappedPath(path);
         boolean noOverwrite = "F".equals(session.getHeaders().get("overwrite"));
-        String destination = session.getHeaders().get("destination");
-        if (null == destination) {
-            return badRequest("onMove");
-        }
-        Uri dst = paths.getUriByMappedPath(destination.substring(SafConstants.SAF_REMOTE_URL.length() - 1));
+        String destination = mappedDestination(session.getHeaders().get("destination"));
+        if (destination == null || !ProviderPaths.isSafeMappedPath(path)) return badRequest("onMove");
+        Uri src = paths.getUriByMappedPath(path);
+        Uri dst = paths.getUriByMappedPath(destination);
 
         boolean exists = true;
         try {

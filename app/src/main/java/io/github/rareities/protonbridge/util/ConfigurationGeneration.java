@@ -29,13 +29,17 @@ public final class ConfigurationGeneration {
     public static void advance(Context context) throws IOException {
         requireLock();
         AtomicFile target = new AtomicFile(file(context));
+        byte[] generation = UUID.randomUUID().toString().getBytes(StandardCharsets.US_ASCII);
         FileOutputStream stream = target.startWrite();
         try {
-            stream.write(UUID.randomUUID().toString().getBytes(StandardCharsets.US_ASCII));
+            stream.write(generation);
             stream.getFD().sync();
             target.finishWrite(stream);
         } catch (IOException error) { target.failWrite(stream); throw error; }
         DurableFiles.syncDirectory(context.getFilesDir());
+        try (java.io.ByteArrayInputStream expected = new java.io.ByteArrayInputStream(generation)) {
+            DurableFiles.verifyContents(target, expected, generation.length);
+        }
     }
     private static void requireLock() {
         if (!ConfigurationExclusion.LOCK.isWriteLockedByCurrentThread())

@@ -42,4 +42,16 @@ public class ConfigurationGenerationTest {
             assertThrows(IOException.class, () -> ConfigurationGeneration.read(context));
         }
     }
+    @Test public void suppressedReplacementCannotReportAdvancedEpoch() throws Exception {
+        Application context = ApplicationProvider.getApplicationContext();
+        try (ConfigurationExclusion.Preparation ignored = ConfigurationExclusion.prepare()) {
+            ConfigurationGeneration.advance(context);
+            File installed = new File(context.getFilesDir(), "configuration-generation");
+            byte[] original = java.nio.file.Files.readAllBytes(installed.toPath());
+            DurableFiles.directorySync = directory -> java.nio.file.Files.write(installed.toPath(), original);
+            assertThrows(IOException.class, () -> ConfigurationGeneration.advance(context));
+            assertArrayEquals(original, java.nio.file.Files.readAllBytes(installed.toPath()));
+        }
+    }
+
 }

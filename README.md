@@ -14,7 +14,8 @@ its Proton Drive Linux work, and implement bisync inside ProtonBridge. My
 [rclone fork](https://github.com/Rareities/rclone) contains the engine changes;
 this app pins an exact reviewed commit rather than following a moving branch.
 I have also made other improvements and fixes to both rclone and the app.
-The [full changelog and commit history](docs/FORK_CHANGELOG.md) explains what changed.
+The [application fork changelog](docs/FORK_CHANGELOG.md) records our app changes.
+The [rclone fork changelog](https://github.com/Rareities/rclone/blob/master/CHANGELOG_FORK.md) separately records our engine changes.
 
 **DISCLAIMER: THIS IS HEAVILY VIBE CODED.** I know very little about Android app
 development, but I know how to work with AI and have spent weeks on this project.
@@ -51,7 +52,7 @@ and bisync approval. Stop old schedules before enabling equivalent new tasks.
 
 ## Installation
 
-Download the [stable 1.2.1 release](https://github.com/Rareities/ProtonBridge/releases/tag/v1.2.1),
+Download the [stable 1.2.2 release](https://github.com/Rareities/ProtonBridge/releases/tag/v1.2.2),
 or browse all [ProtonBridge releases](https://github.com/Rareities/ProtonBridge/releases).
 Use `protonbridge_v<version>-oss-arm64-v8a-release.apk` for most phones, or
 `protonbridge_v<version>-oss-universal-release.apk` if unsure. ARM32, x86 and
@@ -83,7 +84,7 @@ require Resync just because they were added; rclone decides whether its saved
 listings are recoverable. They cannot create a first baseline or repair every
 failed Resync. A changed bundled engine requires a new Resync.
 
-See [usage, security, battery guidance and full change history](docs/FORK_CHANGELOG.md).
+See [application fork change history](docs/FORK_CHANGELOG.md).
 
 Saved filters and task flags apply to Resync and regular sync.
 In the filter editor, choose Exclude and enter `.nomedia` to skip only these

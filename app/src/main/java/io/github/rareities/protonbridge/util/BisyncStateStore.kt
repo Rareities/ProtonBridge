@@ -121,10 +121,13 @@ class BisyncStateStore(private val directory: File) {
         val stream = file.startWrite()
         try {
             stream.write(bytes)
+            stream.fd.sync()
             file.finishWrite(stream)
         } catch (error: Exception) {
             file.failWrite(stream)
             throw error
         }
+        DurableFiles.syncDirectory(directory)
+        bytes.inputStream().use { DurableFiles.verifyContents(file, it, bytes.size) }
     }
 }

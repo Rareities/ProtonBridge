@@ -267,6 +267,7 @@ public class MainActivity extends AppCompatActivity
             return;
         }
         String action = intent.getAction();
+        if (!io.github.rareities.protonbridge.util.InternalActivityAction.isAuthorized(this, intent)) return;
         if (MAIN_ACTIVITY_START_LOG.equals(action)) {
             startLogFragment();
         } else if (MAIN_ACTIVITY_START_IMPORT.equals(action)) {
@@ -316,7 +317,8 @@ public class MainActivity extends AppCompatActivity
     protected void onResume() {
         super.onResume();
         updatePermissionFragmentVisibility();
-        if(MAIN_ACTIVITY_START_LOG.equals(getIntent().getAction())){
+        if (MAIN_ACTIVITY_START_LOG.equals(getIntent().getAction()) &&
+                io.github.rareities.protonbridge.util.InternalActivityAction.isAuthorized(this, getIntent())) {
             startLogFragment();
             navigationView.setCheckedItem(R.id.nav_logs);
         }
@@ -396,18 +398,7 @@ public class MainActivity extends AppCompatActivity
         }
     }
 
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        // TODO: document deletion on exit
-        File dir = getExternalCacheDir();
-        if (dir != null && dir.isDirectory()) {
-            String[] children = dir.list();
-            for (String aChildren : children) {
-                new File(dir, aChildren).delete();
-            }
-        }
-    }
+    // Cache entries are owned by previews/uploads, not by this activity's rotation lifecycle.
 
     @Override
     public void onBackPressed() {

@@ -33,6 +33,8 @@ import java.util.concurrent.Executor
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33], application = Application::class)
 class ForegroundStartOutcomeTest {
+    @get:org.junit.Rule val directoryBarrier = io.github.rareities.protonbridge.util.DirectoryBarrierRule()
+
     private val context: Application get() = ApplicationProvider.getApplicationContext()
     private var promotions = 0
     @Before fun setup() {

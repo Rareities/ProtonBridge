@@ -26,7 +26,7 @@ object BackupRestore {
     fun restore(context: Context, rclone: Rclone, uri: Uri, password: String? = null): Unit = run {
         val archive = BackupArchive.read(context, uri, password)
         try {
-            val plan = ImportPlan.parse(archive.tasks)
+            val plan = ImportPlan.parse(archive.tasks, context)
             val preferences = JSONObject(archive.preferences)
             val proxyPassword = if (archive.encrypted) preferences.optString("proxyPassword", "") else ""
             require(proxyPassword.toByteArray(Charsets.UTF_8).size <= 8192) { "Proxy password exceeds size limit" }

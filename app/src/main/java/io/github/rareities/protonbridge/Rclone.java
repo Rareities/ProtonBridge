@@ -726,7 +726,7 @@ public class Rclone {
     }
 
     public String obscure(String pass) {
-        String[] command = createCommand("obscure", pass);
+        String[] command = createCommand("obscure", "--", pass);
 
         Process process;
         try {
@@ -1307,13 +1307,13 @@ public class Rclone {
     }
 
     public io.github.rareities.protonbridge.util.NativePipeTransfer openDownloadPipe(String rclonePath) throws IOException {
-        String[] command = createCommandWithOptions("cat", rclonePath);
+        String[] command = createCommandWithOptions("cat", "--", rclonePath);
         String[] env = getRcloneEnv();
         return new io.github.rareities.protonbridge.util.NativePipeTransfer(getRuntimeProcess(command, env), false);
     }
 
     public io.github.rareities.protonbridge.util.NativePipeTransfer openUploadPipe(String rclonePath) throws IOException {
-        String[] command = createCommandWithOptions("rcat", rclonePath, "--streaming-upload-cutoff", "500K");
+        String[] command = createCommandWithOptions("rcat", "--streaming-upload-cutoff", "500K", "--", rclonePath);
         String[] env = getRcloneEnv();
         return new io.github.rareities.protonbridge.util.NativePipeTransfer(getRuntimeProcess(command, env), true);
     }
@@ -1342,7 +1342,8 @@ public class Rclone {
     }
 
     public boolean emptyTrashCan(String remote) {
-        String[] command = createCommandWithOptions("cleanup", remote + ":");
+        if (!io.github.rareities.protonbridge.util.RemoteNamePolicy.isValid(remote)) return false;
+        String[] command = createCommandWithOptions("cleanup", "--", remote + ":");
         Process process = null;
         String[] env = getRcloneEnv();
         try {

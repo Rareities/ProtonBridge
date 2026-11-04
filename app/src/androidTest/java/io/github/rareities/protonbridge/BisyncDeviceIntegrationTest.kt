@@ -106,7 +106,7 @@ class BisyncDeviceIntegrationTest {
 
     @Test fun completeNativeBisyncLifecycleAndEncryptedRestore() {
         checkEnvironment()
-        val root = File(context.filesDir, "phase2-fixture-${UUID.randomUUID()}").apply { mkdirs() }
+        val root = File(requireNotNull(context.getExternalFilesDir(null)), "phase2-fixture-${UUID.randomUUID()}").apply { mkdirs() }
         val left = File(root, "left").apply { mkdirs() }
         val right = File(root, "right").apply { mkdirs() }
         for (i in 0 until 20) File(left, "file-$i.txt").writeText("base-$i")

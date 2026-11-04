@@ -86,15 +86,4 @@ object SessionGuardianScheduler {
             .cancelUniqueWork(WORK_NAME)
     }
 
-    /**
-     * Check if the worker is scheduled.
-     */
-    @JvmStatic
-    fun isScheduled(context: Context): Boolean {
-        if (!isEnabled(context)) return false
-        val workInfos = WorkManager.getInstance(context)
-            .getWorkInfosByTagLiveData(WORK_NAME)
-            .getOrAwait()
-        return workInfos.any { !it.state.isFinished }
-    }
 }

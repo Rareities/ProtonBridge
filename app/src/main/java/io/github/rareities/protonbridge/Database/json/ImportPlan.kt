@@ -1,5 +1,8 @@
 package io.github.rareities.protonbridge.Database.json
 
+import android.content.Context
+import android.os.Build
+import java.io.File
 import io.github.rareities.protonbridge.Items.Filter
 import io.github.rareities.protonbridge.Items.Task
 import io.github.rareities.protonbridge.Items.Trigger
@@ -13,7 +16,7 @@ import java.util.UUID
 class ImportPlan(val tasks: List<Task>, val filters: List<Filter>, val triggers: List<Trigger>) {
     companion object {
         @JvmStatic @Throws(JSONException::class)
-        fun parse(json: String): ImportPlan {
+        fun parse(json: String, context: Context): ImportPlan {
             try {
                 require(json.length <= 4 * 1024 * 1024) { "Task backup exceeds 4 MiB" }
                 val root = JSONObject(json)
@@ -33,7 +36,22 @@ class ImportPlan(val tasks: List<Task>, val filters: List<Filter>, val triggers:
                 val taskIds = unique(tasks.map { it.id }, "task")
                 val filterIds = unique(filters.map { it.id }, "filter")
                 unique(triggers.map { it.id }, "schedule")
+                val privateRoots = mutableListOf(File(context.applicationInfo.dataDir).canonicalFile)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    privateRoots.add(File(context.createDeviceProtectedStorageContext().applicationInfo.dataDir).canonicalFile)
+                }
                 for (task in tasks) {
+                    require(listOf(task.remoteId, task.remoteId2).none { it.startsWith("-") }) {
+                        "Imported task has an invalid remote name"
+                    }
+                    if (task.localPath.isNotBlank()) {
+                        val local = File(task.localPath).canonicalPath
+                        require(privateRoots.none { root ->
+                            val privatePath = root.path
+                            local == privatePath || local.startsWith(privatePath + File.separator) ||
+                                privatePath.startsWith(local.trimEnd(File.separatorChar) + File.separator)
+                        }) { "Imported task cannot synchronise app-private data" }
+                    }
                     require(task.title.isNotBlank()) { "Imported task has no name" }
                     require(task.filterId == null || task.filterId == -1L || task.filterId in filterIds) { "Imported task refers to a missing filter" }
                     for (next in listOf(task.onFailFollowup, task.onSuccessFollowup))

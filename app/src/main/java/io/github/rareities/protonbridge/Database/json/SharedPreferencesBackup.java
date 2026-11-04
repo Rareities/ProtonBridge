@@ -93,6 +93,13 @@ public class SharedPreferencesBackup {
         if (json.length() > 256 * 1024) throw new JSONException("Preferences backup is too large");
         JSONObject jsonObject = new JSONObject(json);
 
+        // Imported network values must be valid before any preferences are committed.
+        // Authenticated full backups and rollback snapshots retain their explicit proxy policy.
+        try {
+            io.github.rareities.protonbridge.util.NetworkValues.proxy(
+                    jsonObject.getString("proxyProtocol"), jsonObject.getString("proxyHost"),
+                    jsonObject.getInt("proxyPort"), jsonObject.getString("proxyUser"), "");
+        } catch (IllegalArgumentException invalid) { throw new JSONException("Invalid proxy configuration in backup"); }
         SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(context);
         SharedPreferences.Editor editor = sharedPreferences.edit();
 

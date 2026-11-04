@@ -1,12 +1,12 @@
-ProtonBridge is an unofficial, personal Android project focused on two-way folder sync (bisync) with Proton Drive. It builds with a pinned, reviewed rclone beta fork and incorporates Proton Drive patches originating from OSS Singularities’ Proton Drive Linux project.
+ProtonBridge is an unofficial, personal Android project focused on two-way folder sync (bisync) with Proton Drive. It builds with a pinned, reviewed rclone fork and incorporates Proton Drive patches originating from OSS Singularities’ Proton Drive Linux project.
 
-* Folder bisync with preview, explicit initialisation and scheduled runs
+* Folder bisync with explicit resync, recovery and scheduled runs
 * Rclone file management: browse, upload, download, move and rename files
 * Support for other rclone cloud providers and encrypted remotes
 * Android storage access and automatic dark theme
 
-<b>DISCLAIMER: HEAVILY VIBE CODED.</b> This project was developed with extensive AI assistance by a maintainer with limited Android development experience. Use at your own risk, keep independent backups, and review the sync preview before initialisation. This is a personal project; issues, pull requests and feedback are welcome.
+<b>DISCLAIMER: HEAVILY VIBE CODED.</b> This project was developed with extensive AI assistance by a maintainer with limited Android development experience. Use at your own risk, keep independent backups, and review your folders and settings before resync. This is a personal project; issues, pull requests and feedback are welcome.
 
-ProtonBridge is independent of and not affiliated with Proton AG. It is a fork of thies2005’s CloudBridge, which descends from Round Sync by Felix Nüsse, RCX by x0b and rcloneExplorer by patrykcoding. Original authors and GPLv3 licensing are credited in the repository.
+ProtonBridge is independent of and not affiliated with Proton AG. It is a fork of thies2005’s CloudBridge, which descends from Round Sync by Felix Nüsse, RCX by x0b and rcloneExplorer by patrykcoding. It is powered by rclone by Nick Craig-Wood and contributors. Original authors and GPLv3 licensing are credited in the repository.
 
 Documentation, full changelog and support: https://github.com/Rareities/ProtonBridge

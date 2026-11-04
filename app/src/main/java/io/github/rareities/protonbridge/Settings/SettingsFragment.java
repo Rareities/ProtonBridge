@@ -169,12 +169,12 @@ public class SettingsFragment extends Fragment {
     private Intent getImportIntent() {
         Intent i = new Intent(this.getContext(), MainActivity.class);
         i.setAction(MAIN_ACTIVITY_START_IMPORT);
-        return i;
+        return io.github.rareities.protonbridge.util.InternalActivityAction.authorize(requireContext(), i);
     }
 
     private Intent getExportIntent() {
         Intent i = new Intent(this.getContext(), MainActivity.class);
         i.setAction(MAIN_ACTIVITY_START_EXPORT);
-        return i;
+        return io.github.rareities.protonbridge.util.InternalActivityAction.authorize(requireContext(), i);
     }
 }

@@ -4,26 +4,31 @@ on:
   workflow_dispatch:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   string-change-verification:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     outputs:
       changed: ${{ steps.changeDetection.outputs.should-run }}
       files: ${{ steps.changeDetection.outputs.files }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
       - name: Get changed files
         id: changed-files
         uses: tj-actions/changed-files@ed68ef82c095e0d48ec87eccea555d944a631a4c # v46
-      - name: Verify build.gradle changed
+      - name: Find changed translation resources
         id: changeDetection
         env:
           ALL_CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
         run: |
-          SEARCH='strings.xml'
           CHANGEDFILES=''
           for file in ${ALL_CHANGED_FILES}; do
-            if [[ "$file" == *values-*"$SEARCH" ]]; then
+            if [[ "$file" =~ ^app/src/main/res/values-[A-Za-z0-9+_-]+/strings\.xml$ ]]; then
               echo "$file was changed"
               CHANGEDFILES="${CHANGEDFILES} $file"
               echo "should-run=true" >> $GITHUB_OUTPUT 
@@ -33,27 +38,38 @@ jobs:
 
   checkTranslations:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: string-change-verification
     if: needs.string-change-verification.outputs.changed == 'true'
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Prepare Profanity Check
         id: prep
+        env:
+          CHANGED_FILES: ${{ needs.string-change-verification.outputs.files }}
+          PR_COMMITS: ${{ github.event.pull_request.commits || 1 }}
         run: |
+          set -eu
           sudo apt-get install -y xmlstarlet
           pip3 install alt-profanity-check
           chmod +x ./scripts/checkProfanity.py
           chmod +x ./scripts/generateFilelist.sh
-          FILE_LIST="${{needs.string-change-verification.outputs.files}}"
-          SIZE=$(echo "$FILE_LIST" | awk '{print NF}')
+          SIZE=$(printf '%s\n' "$CHANGED_FILES" | awk '{print NF}')
           if [ "$SIZE" -ne 1 ]; then
             echo "Only pass the amount of commits and one translation file! You passed: $SIZE"
             exit 1
           fi
-          TRANSLATIONS=$(./scripts/generateFilelist.sh ${{ github.event.pull_request.commits }} ${{needs.string-change-verification.outputs.files}})
-          echo "TRANSLATIONS=$TRANSLATIONS" >> $GITHUB_OUTPUT
+          SINGLE_FILE=$(printf '%s\n' "$CHANGED_FILES" | awk '{print $1}')
+          TRANSLATIONS=$(./scripts/generateFilelist.sh "$PR_COMMITS" "$SINGLE_FILE")
+          DELIM="EOF_$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          {
+            echo "TRANSLATIONS<<$DELIM"
+            printf '%s\n' "$TRANSLATIONS"
+            echo "$DELIM"
+          } >> "$GITHUB_OUTPUT"
         shell: sh
       - uses: fabasoad/translation-action@1476a9db97feaa816029bc027103eb89f3b017bf # v4.2.4
         id: google-translate
@@ -62,9 +78,11 @@ jobs:
           lang: auto-en
           source: ${{ steps.prep.outputs.TRANSLATIONS }}
       - name: Print the result
+        env:
+          TRANSLATED_TEXT: ${{ steps.google-translate.outputs.text }}
         run: |
-          echo "Translations are: '${{ steps.google-translate.outputs.text }}'"
-          echo "${{ steps.google-translate.outputs.text }}" | sed 's/ ; /\n/g' > translated_texts.txt
+          printf 'Translations are: %s\n' "$TRANSLATED_TEXT"
+          printf '%s\n' "$TRANSLATED_TEXT" | sed 's/ ; /\n/g' > translated_texts.txt
           ./scripts/checkProfanity.py translated_texts.txt
         shell: sh
       - name: Upload Raw Translations

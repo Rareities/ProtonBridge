@@ -69,7 +69,8 @@ public class StreamingService extends IntentService {
         final Boolean allowRemoteAccess = intent.getBooleanExtra(ALLOW_REMOTE_ACCESS, false);
         final String authenticationUsername = intent.getStringExtra(AUTHENTICATION_USERNAME);
         final String authenticationPassword = intent.getStringExtra(AUTHENTICATION_PASSWORD);
-        final String baseUrl = intent.getStringExtra(SERVE_BASE_URL);
+        final String baseUrl = resolveBaseUrl(intent.getStringExtra(SERVE_BASE_URL),
+                authenticationUsername, authenticationPassword, protocol);
 
         int flags = 0;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -144,6 +145,16 @@ public class StreamingService extends IntentService {
         if (transfer != null) transfer.cancel();
         stopForeground(true);
         stopSelf(startId);
+    }
+
+    static String resolveBaseUrl(String supplied, String user, String password, int protocol) {
+        boolean authenticated = user != null && !user.isEmpty() && password != null && !password.isEmpty();
+        if (supplied != null && !supplied.isEmpty()) return supplied;
+        if (authenticated || protocol == SERVE_FTP || protocol == SERVE_DLNA) return supplied;
+        byte[] token = new byte[16];
+        new java.security.SecureRandom().nextBytes(token);
+        return android.util.Base64.encodeToString(token,
+                android.util.Base64.NO_WRAP | android.util.Base64.NO_PADDING | android.util.Base64.URL_SAFE);
     }
 
     private void setNotificationChannel() {

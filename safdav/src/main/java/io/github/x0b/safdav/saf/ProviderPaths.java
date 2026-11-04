@@ -89,10 +89,22 @@ public class ProviderPaths {
      * @param requestUri a mapped path, e.g. {@code /primary/DCIM}
      * @return an {@link Uri} representing the path as tree uri, e.g. {@code content://com.android.externalstorage.documents/tree/primary:DCIM}
      */
-    public Uri getUriByMappedPath(String requestUri) {
-        if(null == requestUri || '/' != requestUri.charAt(0)){
-            throw new IllegalArgumentException("You must request an actual path permission, not " + requestUri);
+    public static boolean isSafeMappedPath(@Nullable String path) {
+        if (path == null || path.isEmpty() || path.charAt(0) != '/' || path.contains("//") || path.indexOf('\\') >= 0 || path.indexOf('\0') >= 0)
+            return false;
+        for (String segment : path.split("/", -1)) {
+            if (segment.equals(".") || segment.equals("..")) return false;
         }
+        return true;
+    }
+
+    static boolean isWithinPermission(String requested, String granted) {
+        return requested.equals(granted) || requested.startsWith(granted + "/")
+                || (granted.endsWith(":") && requested.startsWith(granted));
+    }
+
+    public Uri getUriByMappedPath(String requestUri) {
+        if (!isSafeMappedPath(requestUri)) throw new ItemNotFoundException();
         Uri thirdParty = getUriThirdParty(requestUri);
         if (null != thirdParty) {
             return thirdParty;
@@ -140,7 +152,7 @@ public class ProviderPaths {
             // provider specific logic - must be adapted for other content providers
             String pathPrefix = ANDROID_EXTERNAL_STORAGE_PREFIX + subPath;
             String permissionPath = permission.getUri().toString().replace("%3A", ":");
-            if(pathPrefix.contains(permissionPath)){
+            if (isWithinPermission(pathPrefix, permissionPath)) {
                 // all ok, we this is a android ext doc path provider and the app has been granted access
                 Log.v(TAG, "Rewrote URI to " + pathPrefix);
                 Uri.Builder builder = new Uri.Builder();
@@ -204,13 +216,20 @@ public class ProviderPaths {
         if (-1 == segmentEnd && requestUri.length() >= 2) {
             segmentEnd = requestUri.length();
         }
+        if (segmentEnd < 1) return null;
         String permissionId = requestUri.substring(1, segmentEnd);
         initUriMaps();
         synchronized (idsByUri) {
             if(urisById.containsKey(permissionId)) {
                 Uri uri = urisById.get(permissionId);
                 if (requestUri.length() >= segmentEnd + 1) {
-                    return uri.buildUpon().appendEncodedPath(requestUri.substring(segmentEnd+1)).build();
+                    Uri.Builder child = uri.buildUpon();
+                    // HTTP paths have already been decoded. Encoding each segment prevents a
+                    // literal %2e/%2f filename from becoming traversal on a second URI decode.
+                    for (String segment : requestUri.substring(segmentEnd + 1).split("/", -1)) {
+                        if (!segment.isEmpty()) child.appendPath(segment);
+                    }
+                    return child.build();
                 } else {
                     return uri;
                 }

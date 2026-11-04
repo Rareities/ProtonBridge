@@ -92,6 +92,7 @@ class AppErrorNotificationManager(var mContext: Context) {
                 action = MainActivity.MAIN_ACTIVITY_START_REAUTH
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 putExtra(AppShortcutsHelper.APP_SHORTCUT_REMOTE_NAME, remoteName)
+                io.github.rareities.protonbridge.util.InternalActivityAction.authorize(mContext, this)
             },
             FLAG_IMMUTABLE or FLAG_UPDATE_CURRENT
         )
