@@ -196,7 +196,7 @@ jobs:
       - name: Run unit tests
         run: |
           set -euo pipefail
-          ./gradlew testOssDebugUnitTest
+          ./gradlew testOssDebugUnitTest -x :rclone:buildAll
 
       - name: Run lint
         run: |
@@ -204,12 +204,21 @@ jobs:
           ./gradlew lint -x :rclone:buildAll
 
       - name: Configure release signing
+        id: signing
         env:
+          RELEASE_KIND: ${{ steps.channel.outputs.release_kind }}
+          MANUAL_PUBLISH: ${{ inputs.publish }}
           CB_KEYSTORE_BASE64: ${{ secrets.CB_KEYSTORE_BASE64 }}
           CB_STORE_PASSWORD: ${{ secrets.CB_STORE_PASSWORD }}
           CB_KEY_ALIAS: ${{ secrets.CB_KEY_ALIAS }}
         run: |
           set -euo pipefail
+          if [[ -z "$CB_KEYSTORE_BASE64" && -z "$CB_STORE_PASSWORD" && -z "$CB_KEY_ALIAS" &&
+                "$RELEASE_KIND" == development && "$MANUAL_PUBLISH" != true ]]; then
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+            echo "::notice::Release signing is not configured. Building debug APKs for CI."
+            exit 0
+          fi
           if [ -z "$CB_KEYSTORE_BASE64" ] || [ -z "$CB_STORE_PASSWORD" ] || [ -z "$CB_KEY_ALIAS" ]; then
             echo "ERROR: Release signing secrets (CB_KEYSTORE_BASE64, CB_STORE_PASSWORD, CB_KEY_ALIAS) must be set in CI." >&2
             exit 1
@@ -217,8 +226,23 @@ jobs:
           mkdir -p app/.config/android
           printf '%s' "$CB_KEYSTORE_BASE64" | base64 -d > app/.config/android/cloudbridge-release.keystore
           keytool -list -keystore app/.config/android/cloudbridge-release.keystore -storepass "$CB_STORE_PASSWORD" -alias "$CB_KEY_ALIAS" >/dev/null
+          echo 'available=true' >> "$GITHUB_OUTPUT"
+
+      - name: Build development CI APKs
+        if: steps.signing.outputs.available == 'false'
+        run: ./gradlew assembleOssDebug
+
+      - name: Retain development CI APKs
+        if: steps.signing.outputs.available == 'false'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cloudbridge-debug-${{ steps.channel.outputs.version_name }}
+          path: app/build/outputs/apk/oss/debug/*.apk
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Build release APKs
+        if: steps.signing.outputs.available == 'true'
         env:
           # Resolved by app/build.gradle's file() against the app module dir,
           # so it must be relative to app/, not to the repo root.
@@ -231,6 +255,7 @@ jobs:
           ./gradlew assembleOssRelease
 
       - name: Build release AAB
+        if: steps.signing.outputs.available == 'true'
         env:
           CB_STORE_FILE: .config/android/cloudbridge-release.keystore
           CB_STORE_PASSWORD: ${{ secrets.CB_STORE_PASSWORD }}
@@ -241,6 +266,7 @@ jobs:
           ./gradlew bundleOssRelease -PnoAbiSplits
 
       - name: Stage artifacts, checksums, and verify signatures
+        if: steps.signing.outputs.available == 'true'
         env:
           TRIGGER_SHA: ${{ github.sha }}
         run: |
@@ -319,6 +345,7 @@ jobs:
           ls -lh "$STAGING_DIR"
 
       - name: Retain verified build artifacts
+        if: steps.signing.outputs.available == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: cloudbridge-${{ steps.channel.outputs.version_name }}
@@ -328,7 +355,7 @@ jobs:
 
       - name: Check publication preconditions
         id: publication
-        if: steps.channel.outputs.publish == 'true'
+        if: steps.signing.outputs.available == 'true' && steps.channel.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}

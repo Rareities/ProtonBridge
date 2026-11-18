@@ -12,6 +12,8 @@ The base is CloudBridge `ccea16c3645a0d2b3cadea38eda90531153f5169`. This rebuild
 
 **Credential logging.** Removed raw configuration output from Internxt reauthentication error logs.
 
+**Android CI.** Runs unit tests and lint, then builds debug APKs for CI when the release signing secrets are absent. Stable and explicitly requested publications still require the configured release signer and verify its certificate.
+
 **Validation.** The final app passed 50 host tests with no failures or skips and passed lint. It built five debug APKs and the instrumentation APK. The packaged engines match the native build outputs and the expected machine type, Android interpreter, 16 KiB alignment and pinned revision. The live Proton, device and signed-release checks were not run.
 
 ## Rebuild commits
