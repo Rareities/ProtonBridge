@@ -16,5 +16,7 @@ The base is CloudBridge `ccea16c3645a0d2b3cadea38eda90531153f5169`. This rebuild
 
 ## Rebuild commits
 
-- `014e6f4fbef3099853444daa98fb7109b858f68e` · 2026-11-19 10:22:36 NZDT (+1300) · “feat: add guarded Proton Drive two-way tasks”
-- `574573e8a2801f17986ad3f347d17e6209b091a7` · 2026-11-19 10:48:05 NZDT (+1300) · “build: pin rclone with concurrent initialization fix”
+[View all commits added since the upstream base](https://github.com/Rareities/ProtonBridge/compare/ccea16c3645a0d2b3cadea38eda90531153f5169...master).
+
+- [`014e6f4fbef3099853444daa98fb7109b858f68e`](https://github.com/Rareities/ProtonBridge/commit/014e6f4fbef3099853444daa98fb7109b858f68e) · 2026-11-19 10:22:36 NZDT (+1300) · “feat: add guarded Proton Drive two-way tasks”
+- [`574573e8a2801f17986ad3f347d17e6209b091a7`](https://github.com/Rareities/ProtonBridge/commit/574573e8a2801f17986ad3f347d17e6209b091a7) · 2026-11-19 10:48:05 NZDT (+1300) · “build: pin rclone with concurrent initialization fix”
