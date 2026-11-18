@@ -8,7 +8,7 @@ The base is CloudBridge `ccea16c3645a0d2b3cadea38eda90531153f5169`. This rebuild
 
 **Run and failure handling.** Scheduled work uses the existing task system and requires a successful matching baseline. The state marker is invalidated before transfers and restored only after a successful matching run. Cancellation and failure leave the task requiring explicit review. Arguments use a structured command, strict checksums and a 10% deletion cap. The local version wins a conflict during the explicitly approved Resync. The workflow rejects unsupported filtered tasks and keeps app-private storage out of endpoints. It uses private work directories and an exclusive bisync lock. Native output is drained and credential diagnostics are redacted.
 
-**Android engine.** The bundled source is Rareities/rclone `04da7ebc056537be4106436b9984d9c68d151959`. Android builds use bionic DNS and PIE at API 23 with 16 KiB ELF alignment for all supported ABIs. The existing Android UI, app version and release identity come from the CloudBridge base. For a local build before the engine commit reaches GitHub, run `./gradlew -Pde.schuelken.cloudbridge.rCloneRepoUrl=file:///workspace/final/rclone assembleOssDebug` from this app checkout.
+**Android engine.** The bundled source is Rareities/rclone `4ada42e93e50b464c7a538607155a1ceb527ca97`. This update shares one initialization for overlapping requests to the same remote path, reducing repeated Proton Drive Argon2 work. It adapts AshSgDe29071999’s [rclone PR #9819](https://github.com/rclone/rclone/pull/9819). Android builds use bionic DNS and PIE at API 23 with 16 KiB ELF alignment for all supported ABIs. The existing Android UI, app version and release identity come from the CloudBridge base.
 
 **Credential logging.** Removed raw configuration output from Internxt reauthentication error logs.
 
@@ -17,3 +17,4 @@ The base is CloudBridge `ccea16c3645a0d2b3cadea38eda90531153f5169`. This rebuild
 ## Rebuild commits
 
 - `014e6f4fbef3099853444daa98fb7109b858f68e` · 2026-11-19 10:22:36 NZDT (+1300) · “feat: add guarded Proton Drive two-way tasks”
+- `574573e8a2801f17986ad3f347d17e6209b091a7` · 2026-11-19 10:48:05 NZDT (+1300) · “build: pin rclone with concurrent initialization fix”
