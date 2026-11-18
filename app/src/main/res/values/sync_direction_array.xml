@@ -7,6 +7,6 @@
         <item>@string/sync_direction_copy_remote_local</item>
         <item>@string/sync_direction_remote_remote</item>
         <item>@string/sync_direction_copy_remote_remote</item>
-        <!--<item>@string/sync_direction_bidirectional</item>-->
+        <item>@string/proton_bisync_direction</item>
     </string-array>
 </resources>

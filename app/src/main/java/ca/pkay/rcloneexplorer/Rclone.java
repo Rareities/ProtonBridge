@@ -487,6 +487,12 @@ public class Rclone {
         }
     }
 
+    public boolean isDirectProtonRemote(String name) {
+        JSONObject remotes = getCachedRemotesConfig();
+        JSONObject settings = remotes == null ? null : remotes.optJSONObject(name);
+        return settings != null && "protondrive".equals(settings.optString("type"));
+    }
+
     /** Drop the cached config dump so the next getRemotes() re-reads it from rclone. */
     public void invalidateRemotesCache() {
         cachedRemotesConfig = null;
@@ -905,6 +911,88 @@ public class Rclone {
             FLog.e(TAG, "sync: error starting rclone", e);
             return null;
         }
+    }
+
+    public String readBisyncConfig() throws IOException, InterruptedException {
+        return readBisyncOutput(Arrays.asList("config", "dump"), 4 * 1024 * 1024);
+    }
+
+    public String identifyProtonBisyncRoot(String remote) throws IOException, InterruptedException, JSONException {
+        String output = readBisyncOutput(Arrays.asList("--contimeout", "10s", "--timeout", "30s",
+                "--retries", "1", "--low-level-retries", "1", "backend", "bisync-identity", "--", remote), 4096);
+        String identity = new JSONObject(output).getString("identity");
+        if (!identity.matches("[0-9a-f]{64}")) throw new IOException("Invalid Proton Drive identity");
+        return identity;
+    }
+
+    private String readBisyncOutput(List<String> arguments, int limit) throws IOException, InterruptedException {
+        ProcessBuilder builder = bisyncProcess(arguments);
+        Process process = builder.start();
+        discardBisyncOutput(process.getErrorStream());
+        try (BufferedReader output = new BufferedReader(new InputStreamReader(
+                process.getInputStream(), StandardCharsets.UTF_8))) {
+            StringBuilder json = new StringBuilder();
+            char[] chars = new char[4096];
+            int count;
+            while ((count = output.read(chars)) != -1) {
+                if (json.length() + count > limit) throw new IOException("Bisync probe output is too large");
+                json.append(chars, 0, count);
+            }
+            if (process.waitFor() != 0) throw new IOException("Bisync probe failed");
+            return json.toString();
+        } finally {
+            process.destroy();
+        }
+    }
+
+    public Process startProtonBisync(String local, String remote, File workDirectory,
+                                    @Nullable String protonIdentity, @Nullable Integer transfers) throws IOException {
+        ArrayList<String> arguments = protonBisyncArguments(local, remote, workDirectory.getAbsolutePath(),
+                protonIdentity, getTransfers(transfers == null ? null : transfers.toString()));
+        // No untrusted remote filenames or credentials are passed to Android logs.
+        Process process = bisyncProcess(arguments).start();
+        discardBisyncOutput(process.getInputStream());
+        discardBisyncOutput(process.getErrorStream());
+        return process;
+    }
+
+    static ArrayList<String> protonBisyncArguments(String local, String remote, String workDirectory,
+                                                   @Nullable String protonIdentity, String transfers) {
+        ArrayList<String> options = new ArrayList<>(Arrays.asList("--workdir", workDirectory,
+                "--checksum", "--require-checksum", "--compare", "size,checksum", "--transfers", transfers,
+                "--retries", "1", "--max-delete", "10", "--max-lock", "15m"));
+        if (protonIdentity != null) {
+            Collections.addAll(options, "--resync", "--resync-mode", "path1", "--proton-identity", protonIdentity);
+        }
+        return savedTransferArguments("bisync", options, local, remote);
+    }
+
+    private static void discardBisyncOutput(InputStream stream) {
+        Thread drain = new Thread(() -> {
+            try (InputStream input = stream) {
+                byte[] buffer = new byte[4096];
+                while (input.read(buffer) != -1) {
+                    // Drain the pipe without persisting native diagnostics.
+                }
+            } catch (IOException ignored) {
+                // Cancellation can close the pipe.
+            }
+        }, "rclone-bisync-output");
+        drain.setDaemon(true);
+        drain.start();
+    }
+
+    private ProcessBuilder bisyncProcess(List<String> arguments) {
+        ArrayList<String> command = new ArrayList<>(Arrays.asList(
+                rclone, "--ask-password=false", "--config", rcloneConf));
+        command.addAll(arguments);
+        ProcessBuilder builder = new ProcessBuilder(command);
+        builder.environment().clear();
+        for (String item : getRcloneEnv()) {
+            int equals = item.indexOf('=');
+            builder.environment().put(item.substring(0, equals), item.substring(equals + 1));
+        }
+        return builder;
     }
 
     static ArrayList<String> savedTransferArguments(String operation, List<String> options, String source, String destination) {

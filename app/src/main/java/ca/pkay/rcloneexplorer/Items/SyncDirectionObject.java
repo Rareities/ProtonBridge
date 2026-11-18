@@ -42,7 +42,7 @@ public class SyncDirectionObject {
 
     /**
      * Direction constants in the same order as {@code R.array.sync_direction_array}. The array is
-     * sparse (bisync entries are commented out), so the spinner position cannot be derived from
+     * sparse (legacy initialization is not an available direction), so the spinner position cannot be derived from
      * the constant value via {@code position + 1}. Use this map instead.
      */
     public static final int[] SPINNER_TO_DIRECTION = new int[]{
@@ -52,6 +52,7 @@ public class SyncDirectionObject {
             COPY_REMOTE_TO_LOCAL,      // 3
             SYNC_REMOTE_TO_REMOTE,     // 4
             COPY_REMOTE_TO_REMOTE,     // 5
+            SYNC_BIDIRECTIONAL,        // 6
     };
 
     /**
@@ -67,7 +68,7 @@ public class SyncDirectionObject {
 
     /**
      * Returns the spinner position for a direction constant, or {@code 0} if the direction is
-     * not in the array (e.g. bisync 5/6, which is commented out).
+     * not in the array (e.g. the legacy bisync initialization direction).
      */
     public static int spinnerPositionForDirection(int direction) {
         for (int i = 0; i < SPINNER_TO_DIRECTION.length; i++) {

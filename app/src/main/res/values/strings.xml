@@ -703,4 +703,17 @@
     <string name="remote_options_content_description">Remote options</string>
     <string name="pinned_content_description">Pinned</string>
     <string name="no_log_entries">No sync log entries yet</string>
+    <string name="proton_bisync_direction">Proton Drive two-way sync</string>
+    <string name="proton_bisync_description">Sync changes and deletions in both directions and verify file checksums. Save the task, reopen it, then choose Initialize or resync before running it for the first time.</string>
+    <string name="proton_bisync_invalid">Choose an existing local folder and a direct Proton Drive remote. Filters and delete-excluded are unavailable for two-way tasks.</string>
+    <string name="proton_bisync_resync">Initialize or resync</string>
+    <string name="proton_bisync_consent">Resync merges the saved folders shown below. When versions conflict, the local version wins. Later runs propagate deletions in both directions and stop if deletions exceed ten percent.\n\nLocal: %1$s\nProton Drive: %2$s</string>
+    <string name="proton_bisync_checking">Checking the saved Proton Drive folder…</string>
+    <string name="proton_bisync_probe_failed">Could not verify the saved Proton Drive folder. Check folder and account access and try again.</string>
+    <string name="proton_bisync_queued">Requested resync. Check task notifications for the result.</string>
+    <string name="proton_bisync_needs_resync">Open the saved two-way task and confirm a resync. Check that both folders and the Proton Drive account are correct.</string>
+    <string name="proton_bisync_complete">Proton Drive two-way sync completed.</string>
+    <string name="proton_bisync_failed">Two-way sync did not complete. Check access to both folders and confirm a resync before trying again.</string>
+    <string name="proton_bisync_foreground">Android could not start the task in the background. Open the app and try again.</string>
+    <string name="proton_bisync_busy">Another two-way task is running. Try this task again after it finishes.</string>
 </resources>

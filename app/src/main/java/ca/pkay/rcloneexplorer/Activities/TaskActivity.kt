@@ -3,6 +3,7 @@ package ca.pkay.rcloneexplorer.Activities
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
+import android.view.Menu
 import android.view.MenuItem
 import android.view.View
 import android.widget.AdapterView
@@ -14,6 +15,7 @@ import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.PopupMenu
 import androidx.appcompat.widget.Toolbar
@@ -31,6 +33,8 @@ import ca.pkay.rcloneexplorer.R
 import ca.pkay.rcloneexplorer.Rclone
 import ca.pkay.rcloneexplorer.SpinnerAdapters.FilterSpinnerAdapter
 import ca.pkay.rcloneexplorer.util.ActivityHelper
+import ca.pkay.rcloneexplorer.workmanager.ProtonBisync
+import ca.pkay.rcloneexplorer.workmanager.SyncManager
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import es.dmoral.toasty.Toasty
 import java.io.UnsupportedEncodingException
@@ -73,6 +77,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
 
 
     private var existingTask: Task? = null
+    private var preparingResync = false
     private var remotePathHolder = ""
     private var remotePathHolder2 = ""
     // Tracks which remote field the RemoteFolderPickerFragment is choosing a path for.
@@ -236,6 +241,50 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         return true
     }
 
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        if (existingTask?.direction == SyncDirectionObject.SYNC_BIDIRECTIONAL) {
+            menu.add(Menu.NONE, RESYNC_MENU, Menu.NONE, R.string.proton_bisync_resync)
+        }
+        return super.onCreateOptionsMenu(menu)
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        if (item.itemId != RESYNC_MENU) return super.onOptionsItemSelected(item)
+        val id = existingTask?.id ?: return true
+        if (preparingResync) return true
+        preparingResync = true
+        Toast.makeText(this, R.string.proton_bisync_checking, Toast.LENGTH_SHORT).show()
+        val context = applicationContext
+        Thread {
+            val approval = try {
+                val saved = DatabaseHandler(context).getTask(id)
+                if (saved?.direction == SyncDirectionObject.SYNC_BIDIRECTIONAL) {
+                    ProtonBisync(context, Rclone(context)).prepareApproval(saved)
+                } else null
+            } catch (_: Exception) {
+                null
+            }
+            runOnUiThread {
+                preparingResync = false
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (approval == null) {
+                    Toast.makeText(this, R.string.proton_bisync_probe_failed, Toast.LENGTH_LONG).show()
+                    return@runOnUiThread
+                }
+                val endpoints = approval.endpoints
+                AlertDialog.Builder(this)
+                    .setTitle(R.string.proton_bisync_resync)
+                    .setMessage(getString(R.string.proton_bisync_consent, endpoints.local, endpoints.remote))
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .setPositiveButton(R.string.proton_bisync_resync) { _, _ ->
+                        SyncManager(context).queueResync(id, approval)
+                        Toast.makeText(this, R.string.proton_bisync_queued, Toast.LENGTH_LONG).show()
+                    }.show()
+            }
+        }.start()
+        return true
+    }
+
     private fun persistTaskChanges() {
         val updatedTask = getTaskValues(existingTask!!.id)
         if (updatedTask != null) {
@@ -330,6 +379,12 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
                 ).show()
                 return null
             }
+        }
+        if (direction == SyncDirectionObject.SYNC_BIDIRECTIONAL &&
+            (!rcloneInstance.isDirectProtonRemote(taskToPopulate.remoteId) || taskToPopulate.filterId != null ||
+                taskToPopulate.deleteExcluded || !java.io.File(taskToPopulate.localPath).isDirectory)) {
+            Toast.makeText(this, R.string.proton_bisync_invalid, Toast.LENGTH_LONG).show()
+            return null
         }
         return taskToPopulate
     }
@@ -632,13 +687,14 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
             SyncDirectionObject.COPY_REMOTE_TO_REMOTE -> text =
                 getString(R.string.description_sync_direction_copy_remotetoremote)
             SyncDirectionObject.SYNC_BIDIRECTIONAL -> text =
-                getString(R.string.description_sync_direction_sync_bidirectional)
+                getString(R.string.proton_bisync_description)
         }
         syncDescription.text = text
     }
 
     companion object {
         const val ID_EXTRA = "TASK_EDIT_ID"
+        private const val RESYNC_MENU = 1
         const val REQUEST_CODE_FP_LOCAL = 500
         const val REQUEST_CODE_FP_REMOTE = 444
         const val REQUEST_CODE_FILTER = 333

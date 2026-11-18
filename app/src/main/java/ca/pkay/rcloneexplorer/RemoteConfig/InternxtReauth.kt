@@ -145,7 +145,7 @@ class InternxtReauth(
 
             if (proc.exitValue() != 0) {
                 errorMessage = describeError("Internxt reauth failed (exit ${proc.exitValue()})", stderrSummary)
-                FLog.e(TAG, "Internxt reauth failed. stderr: $stderrSummary")
+                FLog.e(TAG, "Internxt reauth failed")
                 return false
             }
 
@@ -171,7 +171,7 @@ class InternxtReauth(
                 }
             } catch (e: Exception) {
                 errorMessage = describeError("Failed to parse Internxt reauth state", stderrSummary)
-                FLog.e(TAG, "Failed to parse Internxt reauth state. stdout=$jsonStr stderr=$stderrSummary", e)
+                FLog.e(TAG, "Failed to parse Internxt reauth state")
                 return false
             }
         }
@@ -299,7 +299,7 @@ private fun containsSecret(line: String): Boolean {
 /**
  * Builds a user-facing error message from a short reason and the (already
  * secret-filtered) rclone stderr. Caps the stderr excerpt so the toast stays
- * readable; the full filtered stderr is logged separately.
+ * readable. Raw native output is not logged.
  */
 private fun describeError(reason: String, stderrSummary: String): String {
     if (stderrSummary.isEmpty()) {

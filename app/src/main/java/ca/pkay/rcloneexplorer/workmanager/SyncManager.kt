@@ -46,11 +46,19 @@ class SyncManager(private var mContext: Context) {
         manager.enqueueUniqueWork("task-followup-$taskID", ExistingWorkPolicy.APPEND_OR_REPLACE, request).result.get()
     }
 
-    private fun queueTask(taskID: Long, policy: ExistingWorkPolicy): androidx.work.Operation {
+    internal fun queueResync(taskID: Long, approval: ProtonBisync.Approval) =
+        queueTask(taskID, ExistingWorkPolicy.KEEP, approval)
+
+    private fun queueTask(taskID: Long, policy: ExistingWorkPolicy, approval: ProtonBisync.Approval? = null): androidx.work.Operation {
         val uploadWorkRequest = OneTimeWorkRequestBuilder<SyncWorker>()
 
         val data = Data.Builder()
         data.putLong(SyncWorker.TASK_ID, taskID)
+        if (approval != null) {
+            data.putString(SyncWorker.BISYNC_APPROVAL, approval.endpoints.digest)
+            data.putString(SyncWorker.BISYNC_PROTON_IDENTITY, approval.protonIdentity)
+            data.putLong(SyncWorker.BISYNC_APPROVED_AT, System.currentTimeMillis())
+        }
 
         uploadWorkRequest.setInputData(data.build())
         uploadWorkRequest.addTag(taskID.toString())

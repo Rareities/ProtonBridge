@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
 import android.net.wifi.WifiManager
+import android.os.Build
 import androidx.annotation.StringRes
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.preference.PreferenceManager
@@ -28,6 +29,7 @@ import ca.pkay.rcloneexplorer.util.FLog
 import ca.pkay.rcloneexplorer.util.SyncLog
 import ca.pkay.rcloneexplorer.util.TransferLocks
 import ca.pkay.rcloneexplorer.util.WifiConnectivitiyUtil
+import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.serialization.json.Json
 import org.json.JSONException
 import org.json.JSONObject
@@ -36,12 +38,18 @@ import java.io.IOException
 import java.io.InputStreamReader
 import java.io.InterruptedIOException
 import java.util.Random
+import java.util.concurrent.CancellationException
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.TimeUnit
 
 class SyncWorker (private var mContext: Context, workerParams: WorkerParameters): Worker(mContext, workerParams) {
 
     companion object {
         const val TASK_ID = "TASK_ID"
         const val TASK_EPHEMERAL = "TASK_EPHEMERAL"
+        internal const val BISYNC_APPROVAL = "BISYNC_APPROVAL"
+        internal const val BISYNC_PROTON_IDENTITY = "BISYNC_PROTON_IDENTITY"
+        internal const val BISYNC_APPROVED_AT = "BISYNC_APPROVED_AT"
         private const val TAG = "SyncWorker"
 
         //those Extras do not follow the above schema, because they are exposed to external applications
@@ -73,7 +81,8 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
 
 
     internal enum class FAILURE_REASON {
-        NO_FAILURE, NO_UNMETERED, NO_CONNECTION, RCLONE_ERROR, CONNECTIVITY_CHANGED, CANCELLED, NO_TASK, UNSUPPORTED_DIRECTION
+        NO_FAILURE, NO_UNMETERED, NO_CONNECTION, RCLONE_ERROR, CONNECTIVITY_CHANGED, CANCELLED, NO_TASK, UNSUPPORTED_DIRECTION,
+        BISYNC_NEEDS_RESYNC, BISYNC_FAILED, BISYNC_BUSY, BISYNC_FOREGROUND
     }
 
     // Objects
@@ -91,9 +100,9 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
     private val sIsLoggingEnabled = mPreferences.getBoolean(getString(R.string.pref_key_logs), false)
     private var sConnectivityChanged = false
 
-    private var sRcloneProcess: Process? = null
+    @Volatile private var sRcloneProcess: Process? = null
     private val statusObject = StatusObject(mContext)
-    private var failureReason = FAILURE_REASON.NO_FAILURE
+    @Volatile private var failureReason = FAILURE_REASON.NO_FAILURE
     private var endNotificationAlreadyPosted = false
     private var silentRun = false
     private val ongoingNotificationID = Random().nextInt()
@@ -110,7 +119,7 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
         prepareNotifications()
         registerBroadcastReceivers()
 
-        updateForegroundNotification(mNotificationManager.updateSyncNotification(
+        val foreground = updateForegroundNotification(mNotificationManager.updateSyncNotification(
             mTitle,
             mTitle,
             ArrayList(),
@@ -139,7 +148,7 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
 
         if (ephemeralTask != null) {
             mTask = ephemeralTask
-            handleTask()
+            handleTask(foreground)
             postSync()
         } else {
             failureReason = FAILURE_REASON.NO_TASK
@@ -167,7 +176,7 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
         postSync()
     }
 
-    private fun handleTask() {
+    private fun handleTask(foreground: ListenableFuture<Void>?) {
         mTitle = mTask.title
         mNotificationManager.setCancelId(id)
 
@@ -179,7 +188,15 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
             failureReason = FAILURE_REASON.UNSUPPORTED_DIRECTION
             return
         }
+        if (inputData.getString(BISYNC_APPROVAL) != null && mTask.direction != SyncDirectionObject.SYNC_BIDIRECTIONAL) {
+            failureReason = FAILURE_REASON.BISYNC_NEEDS_RESYNC
+            return
+        }
         if(arePreconditionsMet()) {
+            if (mTask.direction == SyncDirectionObject.SYNC_BIDIRECTIONAL) {
+                handleBisync(foreground)
+                return
+            }
             // The saved type does not retain alias/crypt/cache metadata.
             val remoteItem = mRclone.getRemoteItemFromName(mTask.remoteId)
             if (remoteItem == null) {
@@ -250,13 +267,101 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
         }
     }
 
+    private fun handleBisync(foreground: ListenableFuture<Void>?) {
+        val taskId = inputData.getLong(TASK_ID, -1)
+        val approval = inputData.getString(BISYNC_APPROVAL)
+        val protonIdentity = inputData.getString(BISYNC_PROTON_IDENTITY)
+        val elapsed = System.currentTimeMillis() - inputData.getLong(BISYNC_APPROVED_AT, 0)
+        if (taskId <= 0 || taskId != mTask.id || inputData.keyValueMap.containsKey(TASK_EPHEMERAL) ||
+            (approval != null && (protonIdentity == null || runAttemptCount != 0 || elapsed !in 0..600_000))) {
+            failureReason = FAILURE_REASON.BISYNC_NEEDS_RESYNC
+            return
+        }
+        if (foreground == null) {
+            failureReason = FAILURE_REASON.BISYNC_FOREGROUND
+            return
+        }
+        val transferLocks = TransferLocks.acquire(mContext, "bisync")
+        try {
+            foreground.get()
+            val result = ProtonBisync(mContext, mRclone).run(mTask, approval,
+                { isStopped || failureReason != FAILURE_REASON.NO_FAILURE }) { endpoints, workDir ->
+                val child = mRclone.startProtonBisync(endpoints.local, endpoints.remote, workDir,
+                    if (approval != null) protonIdentity else null, mTask.transfers)
+                sRcloneProcess = child
+                try {
+                    if (isStopped || failureReason != FAILURE_REASON.NO_FAILURE) child.destroy()
+                    waitForBisync(child) == 0
+                } finally {
+                    sRcloneProcess = null
+                }
+            }
+            if (failureReason != FAILURE_REASON.NO_FAILURE) return
+            failureReason = when (result) {
+                ProtonBisync.Result.COMPLETE -> FAILURE_REASON.NO_FAILURE
+                ProtonBisync.Result.NEEDS_RESYNC -> FAILURE_REASON.BISYNC_NEEDS_RESYNC
+                ProtonBisync.Result.FAILED -> FAILURE_REASON.BISYNC_FAILED
+                ProtonBisync.Result.BUSY -> FAILURE_REASON.BISYNC_BUSY
+            }
+            if (result == ProtonBisync.Result.COMPLETE) {
+                sendUploadFinishedBroadcast(mTask.remoteId, mTask.remotePath)
+            }
+        } catch (_: IOException) {
+            if (failureReason == FAILURE_REASON.NO_FAILURE) failureReason = FAILURE_REASON.BISYNC_FAILED
+        } catch (_: JSONException) {
+            if (failureReason == FAILURE_REASON.NO_FAILURE) failureReason = FAILURE_REASON.BISYNC_FAILED
+        } catch (_: ExecutionException) {
+            if (failureReason == FAILURE_REASON.NO_FAILURE) failureReason = FAILURE_REASON.BISYNC_FOREGROUND
+        } catch (_: CancellationException) {
+            if (failureReason == FAILURE_REASON.NO_FAILURE) failureReason = FAILURE_REASON.CANCELLED
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            if (failureReason == FAILURE_REASON.NO_FAILURE) failureReason = FAILURE_REASON.CANCELLED
+        } finally {
+            transferLocks?.release()
+            try {
+                mContext.unregisterReceiver(connectivityChangeBroadcastReceiver)
+            } catch (_: IllegalArgumentException) {
+                // onStopped may already have unregistered it.
+            }
+            mNotificationManager.cancelSyncNotification(ongoingNotificationID)
+        }
+    }
+
+    /** Hold the Android state lock until the native process has stopped writing listings. */
+    private fun waitForBisync(child: Process): Int {
+        var interrupted = false
+        try {
+            while (true) {
+                try {
+                    if (isStopped || failureReason != FAILURE_REASON.NO_FAILURE) child.destroy()
+                    if (Build.VERSION.SDK_INT >= 26) {
+                        if (child.waitFor(1, TimeUnit.SECONDS)) return child.exitValue()
+                    } else {
+                        try {
+                            return child.exitValue()
+                        } catch (_: IllegalThreadStateException) {
+                            Thread.sleep(1000)
+                        }
+                    }
+                } catch (_: InterruptedException) {
+                    interrupted = true
+                    if (Build.VERSION.SDK_INT >= 26) child.destroyForcibly() else child.destroy()
+                }
+            }
+        } finally {
+            if (interrupted) Thread.currentThread().interrupt()
+        }
+    }
+
     private fun isDirectionSupported(direction: Int): Boolean {
         return direction == SyncDirectionObject.SYNC_LOCAL_TO_REMOTE ||
                direction == SyncDirectionObject.SYNC_REMOTE_TO_LOCAL ||
                direction == SyncDirectionObject.COPY_LOCAL_TO_REMOTE ||
                direction == SyncDirectionObject.COPY_REMOTE_TO_LOCAL ||
                direction == SyncDirectionObject.SYNC_REMOTE_TO_REMOTE ||
-               direction == SyncDirectionObject.COPY_REMOTE_TO_REMOTE
+               direction == SyncDirectionObject.COPY_REMOTE_TO_REMOTE ||
+               direction == SyncDirectionObject.SYNC_BIDIRECTIONAL
     }
 
     private fun handleSync(title: String): Int? {
@@ -329,7 +434,7 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
         when (failureReason) {
             FAILURE_REASON.NO_FAILURE -> {
                 showSuccessNotification(notificationId)
-                followupTask(mTask.onSuccessFollowup)
+                if (inputData.getString(BISYNC_APPROVAL) == null) followupTask(mTask.onSuccessFollowup)
                 return
             }
             FAILURE_REASON.CANCELLED -> {
@@ -355,8 +460,12 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
             FAILURE_REASON.UNSUPPORTED_DIRECTION -> {
                 content = mContext.getString(R.string.operation_failed_unsupported_direction, mTitle)
             }
+            FAILURE_REASON.BISYNC_NEEDS_RESYNC -> content = getString(R.string.proton_bisync_needs_resync)
+            FAILURE_REASON.BISYNC_FAILED -> content = getString(R.string.proton_bisync_failed)
+            FAILURE_REASON.BISYNC_BUSY -> content = getString(R.string.proton_bisync_busy)
+            FAILURE_REASON.BISYNC_FOREGROUND -> content = getString(R.string.proton_bisync_foreground)
         }
-        followupTask(mTask.onFailFollowup)
+        if (inputData.getString(BISYNC_APPROVAL) == null) followupTask(mTask.onFailFollowup)
         showFailNotification(notificationId, content)
         endNotificationAlreadyPosted = true
         finishWork()
@@ -372,6 +481,12 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
     }
 
     private fun showSuccessNotification(notificationId: Int) {
+        if (mTask.direction == SyncDirectionObject.SYNC_BIDIRECTIONAL) {
+            val message = getString(R.string.proton_bisync_complete)
+            mNotificationManager.showSuccessNotificationOrReport(mTitle, message, notificationId)
+            SyncLog.info(mContext, mTitle, message)
+            return
+        }
         //Todo: Show sync-errors in notification. Also see line 169
 
         var message = generateSuccessMessage(statusObject)
@@ -499,11 +614,10 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
 
     // Creates an instance of ForegroundInfo which can be used to update the
     // ongoing notification.
-    private fun updateForegroundNotification(notification: Notification?) {
+    private fun updateForegroundNotification(notification: Notification?): ListenableFuture<Void>? =
         notification?.let {
             setForegroundAsync(ForegroundInfo(ongoingNotificationID, it, FOREGROUND_SERVICE_TYPE_DATA_SYNC))
         }
-    }
 
 
     private fun log(message: String) {

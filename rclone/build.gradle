@@ -133,14 +133,6 @@ def getCrossCompiler(abi) {
     ).toString()
 }
 
-def getCC(abi) {
-    def osName = System.properties['os.name']
-    if (osName.startsWith('Windows')) {
-        return null
-    }
-    return getCrossCompiler(abi)
-}
-
 def getOutputPath(abi) {
     return Paths.get(OUTPUT_BASE_PATH, abi, 'librclone.so').toString()
 }
@@ -162,11 +154,14 @@ def buildRclone(abi) {
     ]
 
     return {
+        outputs.file(getOutputPath(abi))
+        outputs.upToDateWhen { false }
         doLast {
             def commonEnv = [
                 'GOPATH'      : GOPATH,
-                'GOOS'        : 'linux',
-                'CGO_ENABLED' : '0',
+                'GOOS'        : 'android',
+                'CGO_ENABLED' : '1',
+                'CC'          : getCrossCompiler(abi),
             ] + abiToEnv[abi]
 
             exec {
@@ -177,11 +172,13 @@ def buildRclone(abi) {
                     environment 'GOTOOLCHAIN', 'local'
                 }
                 workingDir Paths.get(CACHE_PATH, 'rclone-src').toString()
-                def ldflags = "-s -w -X github.com/rclone/rclone/fs.Version=${getSourceVersion()}"
+                def ldflags = "-s -w -linkmode=external -extldflags=-Wl,-z,max-page-size=16384 -X github.com/rclone/rclone/fs.Version=${getSourceVersion()}-cloudbridge.${RCLONE_REF.take(12)}"
                 commandLine (
                     'go',
                     'build',
+                    '-mod=readonly',
                     '-buildvcs=false',
+                    '-buildmode=pie',
                     '-tags',
                     'noselfupdate,nogui',
                     '-trimpath',
@@ -276,15 +273,23 @@ task checkoutRclone(dependsOn: createRcloneModule) {
             }
         }
 
-        // Always sync to the requested ref so upgrades work without manual cache clears
         println "Syncing rclone source to ref: ${RCLONE_REF}"
         exec {
             workingDir srcDir.absolutePath
-            commandLine 'git', 'fetch', 'origin', '--tags'
+            commandLine 'git', 'fetch', '--depth=1', RCLONE_REPO_URL, RCLONE_REF
         }
         exec {
             workingDir srcDir.absolutePath
-            commandLine 'git', 'checkout', RCLONE_REF
+            commandLine 'git', 'checkout', '--detach', RCLONE_REF
+        }
+        def changes = new ByteArrayOutputStream()
+        exec {
+            workingDir srcDir
+            commandLine 'git', 'status', '--porcelain', '--untracked-files=all'
+            standardOutput = changes
+        }
+        if (!changes.toString().trim().isEmpty()) {
+            throw new GradleException('Pinned rclone source must be clean.')
         }
 
         // Verify resolved commit matches pinned SHA and print for traceability

@@ -1,6 +1,7 @@
 package ca.pkay.rcloneexplorer;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 
 import org.junit.Test;
 
@@ -33,5 +34,22 @@ public class RcloneSavedTransferArgumentsTest {
                 ),
                 arguments
         );
+    }
+
+    @Test
+    public void protonBisyncChecksHashesAndCapsDeletionsOnNormalRuns() {
+        List<String> arguments = Rclone.protonBisyncArguments("/local", "proton:folder", "/private", null, "4");
+        assertEquals(Arrays.asList("bisync", "--workdir", "/private", "--checksum", "--require-checksum",
+                "--compare", "size,checksum", "--transfers", "4", "--retries", "1", "--max-delete", "10",
+                "--max-lock", "15m", "--", "/local", "proton:folder"), arguments);
+        assertFalse(arguments.contains("--resync"));
+    }
+
+    @Test
+    public void protonBisyncResyncBindsAuthenticatedConsentAndKeepsOperandsLiteral() {
+        String identity = "0123456789abcdef".repeat(4);
+        List<String> arguments = Rclone.protonBisyncArguments("/local", "proton:--danger", "/private", identity, "4");
+        assertEquals(Arrays.asList("--resync", "--resync-mode", "path1", "--proton-identity", identity,
+                "--", "/local", "proton:--danger"), arguments.subList(arguments.size() - 8, arguments.size()));
     }
 }
